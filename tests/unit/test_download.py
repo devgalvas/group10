@@ -90,8 +90,7 @@ def test_corrupt_zip_fails_after_retries(settings):
     session = FakeSession(*[FakeResponse(body=b"<html>not a zip</html>")] * 3)
     with pytest.raises(DownloadError, match="after 3 attempts"):
         download_day(settings, DAY, session=session, sleep=lambda s: None)
-    target_dir = settings.landing_dir / "date=2026-09-01"
-    assert not any(target_dir.iterdir())
+    assert not (settings.landing_dir / "date=2026-09-01").exists()
 
 
 def test_404_fails_without_retry(settings):
@@ -99,6 +98,7 @@ def test_404_fails_without_retry(settings):
     with pytest.raises(DownloadError, match="not found"):
         download_day(settings, DAY, session=session, sleep=lambda s: None)
     assert len(session.urls) == 1
+    assert not (settings.landing_dir / "date=2026-09-01").exists()
 
 
 def test_existing_valid_zip_is_skipped(settings):
