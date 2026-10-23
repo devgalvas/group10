@@ -6,7 +6,8 @@ import argparse
 import logging
 import platform
 import sys
-from datetime import date
+from collections.abc import Iterator
+from datetime import date, timedelta
 
 from ais_pipeline import __version__
 from ais_pipeline.config import ENVS, Settings, load_settings
@@ -17,6 +18,14 @@ logger = logging.getLogger(__name__)
 def _add_range(parser: argparse.ArgumentParser, required: bool = True) -> None:
     parser.add_argument("--start", type=date.fromisoformat, required=required)
     parser.add_argument("--end", type=date.fromisoformat, required=required)
+
+
+def date_range(start: date, end: date) -> Iterator[date]:
+    """Yield every date from start to end, inclusive."""
+    if end < start:
+        raise ValueError(f"--end {end} is before --start {start}")
+    for offset in range((end - start).days + 1):
+        yield start + timedelta(days=offset)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,6 +85,24 @@ def cmd_check(settings: Settings) -> None:
     logger.info("check OK: Delta round-trip at %s", check_path)
 
 
+def cmd_download(settings: Settings, start: date, end: date) -> None:
+    """Download every day in [start, end]; stop at the first failure."""
+    from ais_pipeline.ingest.download import download_day
+
+    for day in date_range(start, end):
+        result = download_day(settings, day)
+        status = "skipped" if result.skipped else "downloaded"
+        logger.info(
+            "%s %s %s (%.1f MB, %.1f s, sha256=%s)",
+            day,
+            status,
+            result.path.name,
+            result.file_bytes / 1e6,
+            result.seconds,
+            result.sha256[:12],
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -86,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "check":
             cmd_check(settings)
+        elif args.command == "download":
+            cmd_download(settings, args.start, args.end)
         else:
             raise NotImplementedError(f"command {args.command!r} is not implemented yet")
     except Exception:
