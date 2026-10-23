@@ -1,0 +1,25 @@
+env: dev
+data_root: /data/ais/dev
+landing_dir: ${data_root}/landing
+lake_dir: ${data_root}/lake
+source:
+  base_url: "http://aisdata.ais.dk/"      # confirm exact URL/pattern in AIS-11
+  file_pattern: "aisdk-{date}.zip"         # {date} = YYYY-MM-DD
+  sample_file: "aisdk-2026-09-01-sample.zip"
+window: {start: "2026-09-01", end: "2026-09-01"}
+spark:
+  master: "local[4]"
+  app_name: "ais-pipeline-dev"
+  driver_memory: "5g"
+  shuffle_partitions: 16
+  event_log_dir: "file:///data/spark-events"
+quality:
+  max_reject_rate: 0.05          # rejects excl. OUT_OF_SCOPE_MOBILE / rows in scope; set from AIS-16
+  min_rows_vs_median: 0.5        # day row count vs median of processed days
+  min_hours_present: 24
+features:
+  jump_speed_kn: 50
+  port_call_gap_h: 2
+  min_port_call_min: 30
+  anchor_max_sog_kn: 1.0
+refs: {ports: "ref/ports.csv", ship_types: "ref/ship_type_groups.csv"}
