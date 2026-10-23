@@ -4,13 +4,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      lab:
-        description: Lab to run
-        required: true
-        default: all
-        type: choice
-        options: [all, lab2, lab3]
 
 jobs:
   deploy-prod:
@@ -19,43 +12,11 @@ jobs:
     environment: main
     env:
       DAT535_ENV: prod
-      SPARK_HOME: /opt/spark
-      JAVA_HOME: /usr/lib/jvm/java-8-openjdk-amd64
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Resolve output directory
-        id: output-dir
-        # Persistent, non-tmp path: survives runner reboots/tmpfiles cleanup, unlike /tmp
-        run: echo "dir=$HOME/spark-lab-data/prod" >> "$GITHUB_OUTPUT"
-
-      - name: Run Production Pipeline
-        env:
-          DAT535_OUTPUT_DIR: ${{ steps.output-dir.outputs.dir }}
-        run: |
-          source ~/spark-env/bin/activate
-          mkdir -p "$DAT535_OUTPUT_DIR"
-          
-          LAB_TO_RUN="${{ github.event.inputs.lab || 'all' }}"
-          echo "=== Running Production Pipeline ($LAB_TO_RUN) ==="
-          python $GITHUB_WORKSPACE/run_pipeline.py $LAB_TO_RUN
-
-      - name: Upload Production artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: prod-outputs-${{ github.run_number }}
-          path: ${{ steps.output-dir.outputs.dir }}/
-          retention-days: 30
-          if-no-files-found: ignore
-
-      - name: Write pipeline summary
-        run: |
-          echo "## Production Pipeline Run" >> $GITHUB_STEP_SUMMARY
-          echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Run # | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Lab | ${{ github.event.inputs.lab || 'all' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+      - name: Placeholder
+        run: echo "pipeline not wired yet (AIS-38)"
