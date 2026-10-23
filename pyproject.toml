@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ais-pipeline"
+version = "0.1.0"
+description = "Medallion pipeline for DMA AIS data: port calls and congestion (DAT535 Group 10)"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "pyspark>=3.5.3,<3.6",
+    "delta-spark>=3.2,<3.3",
+    "pyyaml>=6.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "chispa>=0.10"]
+dashboard = ["streamlit>=1.38", "deltalake>=0.20", "pandas>=2.2", "altair>=5"]
+
+[project.scripts]
+ais-pipeline = "ais_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ais_pipeline = ["contracts/*.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: slower tests that touch Delta on temp dirs"]
