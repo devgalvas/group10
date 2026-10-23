@@ -1,0 +1,17 @@
+[Unit]
+Description=Spark History Server (reads /data/spark-events)
+After=network-online.target
+RequiresMountsFor=/data
+
+[Service]
+Type=simple
+User=ubuntu
+Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+Environment=SPARK_HOME=/opt/spark
+Environment="SPARK_HISTORY_OPTS=-Dspark.history.fs.logDirectory=file:///data/spark-events -Dspark.history.ui.port=18080 -Dspark.history.fs.cleaner.enabled=true -Dspark.history.fs.cleaner.maxAge=30d"
+ExecStart=/opt/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
