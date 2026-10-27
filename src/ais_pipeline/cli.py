@@ -103,17 +103,21 @@ def cmd_download(settings: Settings, start: date, end: date) -> None:
         )
 
 
-def cmd_bronze(settings: Settings, start: date, end: date) -> None:
-    """Ingest every landing zip in [start, end] into bronze.ais_raw, one partition per day."""
-    from ais_pipeline.ingest.bronze import ingest_day
+def cmd_bronze(settings: Settings, start: date, end: date, force: bool = False) -> None:
+    """Ingest every landing zip in [start, end] into bronze.ais_raw, one partition per day.
+
+    Days whose file was already ingested (same SHA-256) are skipped unless force is set.
+    """
+    from ais_pipeline.ingest.bronze import run_bronze_day
     from ais_pipeline.ops.runs import new_run_id
     from ais_pipeline.spark import build_spark
 
     spark = build_spark(settings)
     run_id = new_run_id()
-    logger.info("bronze run %s for %s..%s", run_id, start, end)
+    logger.info("bronze run %s for %s..%s (force=%s)", run_id, start, end, force)
     for day in date_range(start, end):
-        ingest_day(spark, settings, day, run_id)
+        entry = run_bronze_day(spark, settings, day, run_id, force=force)
+        logger.info("%s %s %s (rows=%s)", day, entry.status, entry.file_name, entry.row_count)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -129,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "download":
             cmd_download(settings, args.start, args.end)
         elif args.command == "bronze":
-            cmd_bronze(settings, args.start, args.end)
+            cmd_bronze(settings, args.start, args.end, args.force)
         else:
             raise NotImplementedError(f"command {args.command!r} is not implemented yet")
     except Exception:

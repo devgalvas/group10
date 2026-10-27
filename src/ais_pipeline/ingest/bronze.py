@@ -24,6 +24,7 @@ from pyspark.sql.types import StringType, StructField, StructType
 from ais_pipeline.config import Settings
 from ais_pipeline.delta_io import write_partition
 from ais_pipeline.ingest.download import file_name, sha256_file
+from ais_pipeline.ingest.ingestion_log import LogEntry, latest_success, write_entry
 from ais_pipeline.paths import landing_path, table_path
 
 logger = logging.getLogger(__name__)
@@ -233,3 +234,67 @@ def ingest_day(
         result.seconds,
     )
     return result
+
+
+def run_bronze_day(
+    spark: SparkSession, settings: Settings, day: date, run_id: str, force: bool = False
+) -> LogEntry:
+    """Ingest one day unless that exact file is already in Bronze; log the attempt.
+
+    The file's SHA-256 is compared with the latest `success` entry for the day in
+    ops.ingestion_log. The same hash means the partition already holds this file, so nothing
+    is written and the attempt is logged as `skipped`. A new hash (or force) re-ingests, and
+    replaceWhere swaps the partition. A failure is logged as `failed` and re-raised.
+    """
+    zip_path = landing_zip(settings, day)
+    try:
+        sha = sha256_file(zip_path) if zip_path.is_file() else None
+        previous = None if force or sha is None else latest_success(spark, settings, day)
+        if previous is not None and previous["file_sha256"] == sha:
+            entry = LogEntry(
+                day,
+                "skipped",
+                run_id,
+                file_name=zip_path.name,
+                file_sha256=sha,
+                file_bytes=zip_path.stat().st_size,
+                message=f"same sha256 as run {previous['run_id']}",
+            )
+            write_entry(spark, settings, entry)
+            logger.info("bronze %s skipped: %s already ingested", day, zip_path.name)
+            return entry
+        result = ingest_day(spark, settings, day, run_id, file_sha256=sha)
+    except Exception as exc:
+        _log_failure(spark, settings, day, run_id, zip_path.name, exc)
+        raise
+
+    message = f"corrupt_rows={result.corrupt_rows}"
+    if result.header.extra_columns:
+        message += f"; extra_columns={result.header.extra_columns}"
+    if force:
+        message += "; forced"
+    entry = LogEntry(
+        day,
+        "success",
+        run_id,
+        file_name=result.file_name,
+        file_sha256=result.file_sha256,
+        file_bytes=result.file_bytes,
+        row_count=result.rows,
+        header_hash=result.header.header_hash,
+        contract_version=result.header.contract_version,
+        message=message,
+    )
+    write_entry(spark, settings, entry)
+    return entry
+
+
+def _log_failure(
+    spark: SparkSession, settings: Settings, day: date, run_id: str, name: str, exc: Exception
+) -> None:
+    """Record a failed attempt; never let a logging error hide the original exception."""
+    entry = LogEntry(day, "failed", run_id, file_name=name, message=f"{type(exc).__name__}: {exc}")
+    try:
+        write_entry(spark, settings, entry)
+    except Exception:
+        logger.exception("could not write the failed ingestion_log entry for %s", day)
