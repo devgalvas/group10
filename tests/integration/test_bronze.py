@@ -4,7 +4,8 @@ from datetime import date
 import pytest
 from pyspark.sql.types import StringType
 
-from ais_pipeline.ingest.bronze import ingest_day
+from ais_pipeline.ingest.bronze import ingest_day, run_bronze_day
+from ais_pipeline.ingest.ingestion_log import log_path
 from ais_pipeline.paths import table_path
 
 pytestmark = pytest.mark.integration
@@ -71,3 +72,57 @@ def test_rerun_replaces_partition(spark, settings):
 def test_missing_landing_file_raises(spark, settings):
     with pytest.raises(FileNotFoundError, match="run download first"):
         ingest_day(spark, settings, DAY, run_id="r1")
+
+
+def _log(spark, settings):
+    return spark.read.format("delta").load(str(log_path(settings))).orderBy("logged_at")
+
+
+def test_same_file_twice_is_skipped(spark, settings):
+    _write_landing(settings, [GOOD.format(s=i) for i in range(5)])
+    first = run_bronze_day(spark, settings, DAY, run_id="r1")
+    second = run_bronze_day(spark, settings, DAY, run_id="r2")
+
+    assert (first.status, first.row_count) == ("success", 5)
+    assert second.status == "skipped"
+    assert "r1" in second.message
+    df = _bronze(spark, settings)
+    assert df.count() == 5
+    assert {r["_run_id"] for r in df.select("_run_id").distinct().collect()} == {"r1"}
+    assert [r["status"] for r in _log(spark, settings).collect()] == ["success", "skipped"]
+
+
+def test_changed_file_is_reingested(spark, settings):
+    _write_landing(settings, [GOOD.format(s=i) for i in range(5)])
+    first = run_bronze_day(spark, settings, DAY, run_id="r1")
+    # One byte differs (SOG 7.1 -> 7.2 in the last row), so the zip hash changes.
+    _write_landing(
+        settings,
+        [GOOD.format(s=i) for i in range(4)] + [GOOD.format(s=4).replace(",7.1,", ",7.2,")],
+    )
+    second = run_bronze_day(spark, settings, DAY, run_id="r2")
+
+    assert second.status == "success"
+    assert second.file_sha256 != first.file_sha256
+    df = _bronze(spark, settings)
+    assert df.count() == 5
+    assert {r["_run_id"] for r in df.select("_run_id").distinct().collect()} == {"r2"}
+
+
+def test_force_reingests_same_file(spark, settings):
+    _write_landing(settings, [GOOD.format(s=i) for i in range(3)])
+    run_bronze_day(spark, settings, DAY, run_id="r1")
+    forced = run_bronze_day(spark, settings, DAY, run_id="r2", force=True)
+
+    assert forced.status == "success"
+    assert "forced" in forced.message
+    assert _bronze(spark, settings).count() == 3
+
+
+def test_failure_is_logged_and_raised(spark, settings):
+    with pytest.raises(FileNotFoundError):
+        run_bronze_day(spark, settings, DAY, run_id="r1")
+    row = _log(spark, settings).first()
+    assert row["status"] == "failed"
+    assert row["file_name"] == "aisdk-2026-09-01.zip"
+    assert "FileNotFoundError" in row["message"]
