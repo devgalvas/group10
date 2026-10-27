@@ -34,3 +34,9 @@ def write_partition(df: DataFrame, path: Path | str, partition_col: str, value: 
         .save(str(path))
     )
     logger.info("wrote %s partition %s", path, predicate)
+
+
+def append(df: DataFrame, path: Path | str) -> None:
+    """Append rows to a Delta table, creating it on first use. Only for ops log tables."""
+    df.write.format("delta").mode("append").save(str(path))
+    logger.info("appended to %s", path)
