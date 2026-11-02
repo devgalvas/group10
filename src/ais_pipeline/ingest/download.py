@@ -91,6 +91,24 @@ def download_day(
     url = source_url(settings, day)
     session = session or requests.Session()
 
+    try:
+        return _download_with_retries(session, url, part, target, started, sleep)
+    except DownloadError:
+        # Do not leave an empty date=... folder behind for a day that was never fetched.
+        if target_dir.is_dir() and not any(target_dir.iterdir()):
+            target_dir.rmdir()
+        raise
+
+
+def _download_with_retries(
+    session: requests.Session,
+    url: str,
+    part: Path,
+    target: Path,
+    started: float,
+    sleep: Callable[[float], None],
+) -> DownloadResult:
+    """Fetch url into target via part, retrying with exponential backoff (404 is not retried)."""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             logger.info("downloading %s (attempt %d/%d)", url, attempt, MAX_ATTEMPTS)

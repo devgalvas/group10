@@ -103,6 +103,19 @@ def cmd_download(settings: Settings, start: date, end: date) -> None:
         )
 
 
+def cmd_bronze(settings: Settings, start: date, end: date) -> None:
+    """Ingest every landing zip in [start, end] into bronze.ais_raw, one partition per day."""
+    from ais_pipeline.ingest.bronze import ingest_day
+    from ais_pipeline.ops.runs import new_run_id
+    from ais_pipeline.spark import build_spark
+
+    spark = build_spark(settings)
+    run_id = new_run_id()
+    logger.info("bronze run %s for %s..%s", run_id, start, end)
+    for day in date_range(start, end):
+        ingest_day(spark, settings, day, run_id)
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -115,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd_check(settings)
         elif args.command == "download":
             cmd_download(settings, args.start, args.end)
+        elif args.command == "bronze":
+            cmd_bronze(settings, args.start, args.end)
         else:
             raise NotImplementedError(f"command {args.command!r} is not implemented yet")
     except Exception:
