@@ -1,0 +1,158 @@
+{
+  "source_file": "aisdk-2026-09-01.zip",
+  "source_rows": 18658332,
+  "seed": 535,
+  "rows": 259,
+  "bytes": 50010,
+  "vessels": {
+    "in_port": "212209000",
+    "moving_a": "212112000",
+    "moving_b": "311066400"
+  },
+  "defects": [
+    {
+      "line": 2,
+      "mmsi": "2190064",
+      "timestamp": "01/09/2026 00:00:00",
+      "defect": "out_of_scope_mobile",
+      "expected": "OUT_OF_SCOPE_MOBILE",
+      "note": "type_of_mobile 'Base Station'"
+    },
+    {
+      "line": 3,
+      "mmsi": "2194006",
+      "timestamp": "01/09/2026 00:00:00",
+      "defect": "out_of_scope_mobile",
+      "expected": "OUT_OF_SCOPE_MOBILE",
+      "note": "type_of_mobile 'Base Station'"
+    },
+    {
+      "line": 4,
+      "mmsi": "992111888",
+      "timestamp": "01/09/2026 00:00:00",
+      "defect": "out_of_scope_mobile",
+      "expected": "OUT_OF_SCOPE_MOBILE",
+      "note": "type_of_mobile 'AtoN'"
+    },
+    {
+      "line": 14,
+      "mmsi": "212112000",
+      "timestamp": "01/09/2026 00:03:02",
+      "defect": "exact_duplicate",
+      "expected": "EXACT_DUPLICATE",
+      "note": "verbatim copy of the previous line"
+    },
+    {
+      "line": 18,
+      "mmsi": "311066400",
+      "timestamp": "01/09/2026 00:04:09",
+      "defect": "position_sentinel",
+      "expected": "POSITION_SENTINEL",
+      "note": "lat 91 and lon 181 (DMA 'not available')"
+    },
+    {
+      "line": 23,
+      "mmsi": "212112000",
+      "timestamp": "01/09/2026 00:06:08",
+      "defect": "ts_conflict",
+      "expected": "TS_CONFLICT",
+      "note": "same (mmsi, ts) as the previous line, SOG differs"
+    },
+    {
+      "line": 28,
+      "mmsi": "212209000",
+      "timestamp": "31/08/2026 00:07:36",
+      "defect": "ts_outside_file_day",
+      "expected": "TS_OUTSIDE_FILE_DAY",
+      "note": "timestamp on the previous day"
+    },
+    {
+      "line": 31,
+      "mmsi": "12345",
+      "timestamp": "01/09/2026 00:08:09",
+      "defect": "bad_mmsi",
+      "expected": "BAD_MMSI",
+      "note": "MMSI with 5 digits"
+    },
+    {
+      "line": 36,
+      "mmsi": "212112000",
+      "timestamp": "2026-09-01T00:10:08",
+      "defect": "bad_timestamp",
+      "expected": "BAD_TIMESTAMP",
+      "note": "ISO 8601 instead of dd/MM/yyyy HH:mm:ss"
+    },
+    {
+      "line": 42,
+      "mmsi": "311066400",
+      "timestamp": "01/09/2026 00:12:09",
+      "defect": "heading_sentinel",
+      "expected": "HEADING_SENTINEL",
+      "note": "heading 511 (DMA 'not available')"
+    },
+    {
+      "line": 43,
+      "mmsi": "212112000",
+      "timestamp": "01/09/2026 00:12:10",
+      "defect": "sog_sentinel",
+      "expected": "SOG_SENTINEL",
+      "note": "SOG 102.3 (DMA 'not available')"
+    },
+    {
+      "line": 50,
+      "mmsi": "212209000",
+      "timestamp": "01/09/2026 00:14:50",
+      "defect": "exact_duplicate",
+      "expected": "EXACT_DUPLICATE",
+      "note": "verbatim copy of the previous line"
+    },
+    {
+      "line": 53,
+      "mmsi": "212112000",
+      "timestamp": "01/09/2026 00:15:44",
+      "defect": "position_jump",
+      "expected": "POSITION_JUMP",
+      "note": "+0.5 deg latitude 30 s after the previous fix (~3600 kn); the next fix jumps back"
+    },
+    {
+      "line": 64,
+      "mmsi": "311066400",
+      "timestamp": "01/09/2026 00:20:09",
+      "defect": "name_change",
+      "expected": "SCD2_NEW_VERSION",
+      "note": "name 'SONANGOL HUILA' -> 'SONANGOL HUILA II' from here on"
+    },
+    {
+      "line": 67,
+      "mmsi": "311066400",
+      "timestamp": "01/09/2026 00:21:09",
+      "defect": "name_change",
+      "expected": "SCD2_NEW_VERSION",
+      "note": "name 'SONANGOL HUILA' -> 'SONANGOL HUILA II' from here on"
+    },
+    {
+      "line": 70,
+      "mmsi": "311066400",
+      "timestamp": "01/09/2026 00:22:19",
+      "defect": "name_change",
+      "expected": "SCD2_NEW_VERSION",
+      "note": "name 'SONANGOL HUILA' -> 'SONANGOL HUILA II' from here on"
+    },
+    {
+      "line": 72,
+      "mmsi": "311066400",
+      "timestamp": "01/09/2026 00:23:19",
+      "defect": "name_change",
+      "expected": "SCD2_NEW_VERSION",
+      "note": "name 'SONANGOL HUILA' -> 'SONANGOL HUILA II' from here on"
+    },
+    {
+      "line": 73,
+      "mmsi": "311066400",
+      "timestamp": "01/09/2026 00:24:19",
+      "defect": "name_change",
+      "expected": "SCD2_NEW_VERSION",
+      "note": "name 'SONANGOL HUILA' -> 'SONANGOL HUILA II' from here on"
+    }
+  ]
+}
