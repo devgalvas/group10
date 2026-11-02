@@ -60,6 +60,8 @@ def _synthetic_day() -> list[list[str]]:
         rows.append(_row(ts, "Class A", "219000002", 57.0 + k * 0.004, 11.0, 12.0, "FAST ONE"))
         rows.append(_row(ts, "Class A", "219000003", 54.5, 11.5 + k * 0.005, 9.0, "FAST TWO"))
         rows.append(_row(ts, "Class A", "219000004", 56.0, 4.0, 0.1, "DRIFTER"))
+        # shared default MMSI: two transmitters far apart, highest SOG, must not be picked
+        rows.append(_row(ts, "Class A", "226000000", 43.0 + 7 * (k % 2), -1.0, 30.0, "DEFAULT"))
         # dirty rows the selection must skip
         rows.append(_row(ts, "Class A", "111", 56.0, 4.0, 3.0, "BAD MMSI"))
         rows.append(_row(ts, "Class A", "219000009", 91.0, 181.0, 3.0, "SENTINEL"))

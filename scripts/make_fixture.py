@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ais_pipeline.geo import Port, load_ports, nearest_port
+from ais_pipeline.geo import Port, haversine_km, load_ports, nearest_port
 from ais_pipeline.ingest.bronze import sanitize_name
 from ais_pipeline.ingest.raw_csv import open_raw_csv
 
@@ -37,6 +37,8 @@ MAX_TRACK = 25
 MIN_GAP_S = 60
 MAX_TRACKED_VESSELS = 20_000
 MIN_MOVING_SOG = 5.0
+MAX_IMPLIED_KN = 50.0  # = features.jump_speed_kn; base tracks must not trip POSITION_JUMP
+KM_PER_NM = 1.852
 DEFAULT_FILLER = 180
 DEFAULT_SEED = 535
 MAX_FIXTURE_BYTES = 100_000
@@ -147,10 +149,29 @@ def _parse_ts(value: str) -> datetime | None:
         return None
 
 
+def max_implied_kn(track: list[Row], idx: dict[str, int]) -> float:
+    """Highest speed implied by consecutive fixes; catches shared/default MMSIs that jump."""
+    worst = 0.0
+    for a, b in zip(track, track[1:], strict=False):
+        hours = (b.ts - a.ts).total_seconds() / 3600
+        km = haversine_km(
+            float(a.fields[idx["latitude"]]),
+            float(a.fields[idx["longitude"]]),
+            float(b.fields[idx["latitude"]]),
+            float(b.fields[idx["longitude"]]),
+        )
+        worst = max(worst, km / KM_PER_NM / hours)
+    return worst
+
+
 def choose_vessels(sel: Selection, ports: list[Port]) -> tuple[str, str, str]:
     """(port vessel, moving vessel A, moving vessel B), deterministic."""
     idx = sel.idx
-    full = {m: t for m, t in sel.tracks.items() if len(t) >= MIN_TRACK}
+    full = {
+        m: t
+        for m, t in sel.tracks.items()
+        if len(t) >= MIN_TRACK and max_implied_kn(t, idx) <= MAX_IMPLIED_KN
+    }
 
     def in_port(track: list[Row]) -> int:
         n = 0
@@ -189,9 +210,12 @@ def build_rows(sel: Selection, vessels: tuple[str, str, str]) -> list[Row]:
         return r.fields[idx["mmsi"]], r.fields[idx["timestamp"]]
 
     used = {key(r) for r in rows}
+    filler_mmsi: set[str] = set()
     for r in sel.filler:
-        if r.fields[idx["mmsi"]] in vessels or key(r) in used:
-            continue  # avoids unplanned exact duplicates and (mmsi, ts) conflicts
+        mmsi = r.fields[idx["mmsi"]]
+        if mmsi in vessels or mmsi in filler_mmsi or key(r) in used:
+            continue  # one row per MMSI: no unplanned duplicates, conflicts or jumps
+        filler_mmsi.add(mmsi)
         used.add(key(r))
         rows.append(r)
 
