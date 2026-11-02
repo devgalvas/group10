@@ -31,7 +31,7 @@ ais_pipeline = ["contracts/*.json"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["labs"]
+extend-exclude = ["labs", "notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
