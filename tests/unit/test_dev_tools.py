@@ -58,6 +58,8 @@ def _synthetic_day() -> list[list[str]]:
         ts = DAY + timedelta(minutes=2 * k)
         rows.append(_row(ts, "Class A", "219000001", 55.466, 8.430, 0.0, "MOORED"))
         rows.append(_row(ts, "Class A", "219000002", 57.0 + k * 0.004, 11.0, 12.0, "FAST ONE"))
+        # fastest coherent track but no name: must not be picked (rename would be null -> value)
+        rows.append(_row(ts, "Class A", "219000005", 55.0, 15.0 - k * 0.01, 25.0, ""))
         rows.append(_row(ts, "Class A", "219000003", 54.5, 11.5 + k * 0.005, 9.0, "FAST TWO"))
         rows.append(_row(ts, "Class A", "219000004", 56.0, 4.0, 0.1, "DRIFTER"))
         # shared default MMSI: two transmitters far apart, highest SOG, must not be picked

@@ -43,6 +43,7 @@ DEFAULT_FILLER = 180
 DEFAULT_SEED = 535
 MAX_FIXTURE_BYTES = 100_000
 _MMSI_OK = re.compile(r"^[2-7]\d{8}$")
+NAME_PLACEHOLDERS = ("", "Unknown", "Unknown value", "Undefined", "N/A")
 
 
 @dataclass
@@ -190,12 +191,18 @@ def choose_vessels(sel: Selection, ports: list[Port]) -> tuple[str, str, str]:
     port_vessel = port_scores[0][1]
 
     moving = sorted(
-        ((median_sog(t), m) for m, t in full.items() if m != port_vessel),
+        # A real name on every fix, so the planted rename is a true name change (SCD2),
+        # not null -> value.
+        (
+            (median_sog(t), m)
+            for m, t in full.items()
+            if m != port_vessel and all(r.fields[idx["name"]] not in NAME_PLACEHOLDERS for r in t)
+        ),
         key=lambda s: (-s[0], s[1]),
     )
     moving = [m for sog, m in moving if sog >= MIN_MOVING_SOG][:2]
     if len(moving) < 2:
-        raise SystemExit("fewer than 2 moving Class A vessels with >= 20 positions")
+        raise SystemExit("fewer than 2 named, moving Class A vessels with >= 20 positions")
     return port_vessel, moving[0], moving[1]
 
 
@@ -306,8 +313,6 @@ def build_rows(sel: Selection, vessels: tuple[str, str, str]) -> list[Row]:
 
     # Name change: the last 5 positions of vessel B carry a new name (feeds dim_vessel SCD2).
     old_name = tb[0].fields[idx["name"]]
-    if old_name in ("", "Unknown", "Unknown value", "Undefined", "N/A"):
-        old_name = "FIXTURE VESSEL"
     new_name = f"{old_name} II"
     for r in tb[-5:]:
         r.fields[idx["name"]] = new_name
@@ -387,7 +392,8 @@ def render_readme(meta: dict) -> str:
         "",
         "**Vessels with full tracks** (>= 20 positions, >= 60 s apart):",
         f"- `{v['in_port']}`: inside a port radius;",
-        f"- `{v['moving_a']}` and `{v['moving_b']}`: moving (median SOG >= {MIN_MOVING_SOG} kn).",
+        f"- `{v['moving_a']}` and `{v['moving_b']}`: named, moving "
+        f"(median SOG >= {MIN_MOVING_SOG} kn).",
         "",
         "| Line | MMSI | Defect | Expected handling | Note |",
         "|---:|---|---|---|---|",
