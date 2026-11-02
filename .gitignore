@@ -20,3 +20,6 @@ derby.log
 /data/
 *.parquet
 _delta_log/
+
+# Local CI lake
+.ais-ci/
