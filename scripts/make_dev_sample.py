@@ -1,7 +1,7 @@
 """Build the dev sample of one real AIS day (AIS-15).
 
-Keeps every row within --radius-km of a port centre in ref/ports.csv, plus a seeded random
---rate share of the rest, and writes aisdk-<date>-sample.zip into the dev landing folder.
+Keeps every row within --radius-km (15) of a port centre in ref/ports.csv, plus a seeded random
+--rate (0.5%) share of the rest, and writes aisdk-<date>-sample.zip into the dev landing folder.
 
     python scripts/make_dev_sample.py /data/ais/prod/landing/date=2026-09-01/aisdk-2026-09-01.zip
 """
@@ -24,8 +24,9 @@ from ais_pipeline.ingest.bronze import sanitize_name
 from ais_pipeline.ingest.raw_csv import open_raw_csv, write_csv_zip
 from ais_pipeline.paths import landing_path
 
-DEFAULT_RADIUS_KM = 25.0
-DEFAULT_RATE = 0.02
+# 15 km > the largest anchorage radius (12 km); with 0.5% random this gives ~1 M rows/day.
+DEFAULT_RADIUS_KM = 15.0
+DEFAULT_RATE = 0.005
 DEFAULT_SEED = 535
 _DATE_IN_NAME = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
