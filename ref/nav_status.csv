@@ -1,0 +1,17 @@
+source_text,nav_status
+Under way using engine,under_way_engine
+At anchor,at_anchor
+Not under command,not_under_command
+Restricted maneuverability,restricted_maneuverability
+Restricted manoeuverability,restricted_maneuverability
+Constrained by her draught,constrained_by_draught
+Moored,moored
+Aground,aground
+Engaged in fishing,engaged_in_fishing
+Under way sailing,under_way_sailing
+Reserved for future amendment [HSC],reserved_hsc
+Reserved for future amendment [WIG],reserved_wig
+Power-driven vessel towing astern,towing_astern
+Power-driven vessel pushing ahead or towing alongside,pushing_or_towing_alongside
+Reserved for future use,reserved
+AIS-SART is active,ais_sart_active

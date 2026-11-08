@@ -22,4 +22,8 @@ features:
   port_call_gap_h: 2
   min_port_call_min: 30
   anchor_max_sog_kn: 1.0
-refs: {ports: "ref/ports.csv", ship_types: "ref/ship_type_groups.csv"}
+  scd2_min_reports: 2           # a static combination needs this many rows in a day to version
+refs:
+  ports: "ref/ports.csv"
+  ship_types: "ref/ship_type_groups.csv"
+  nav_status: "ref/nav_status.csv"
