@@ -1,0 +1,46 @@
+name: DAT535 — Scheduled Pipeline
+
+# Every 6 hours, process the next day of the prod window (simulated daily arrival).
+# A manual dispatch backfills a date range. Runs the deployed release in /opt/ais-pipeline.
+on:
+  schedule:
+    - cron: "15 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "First date (YYYY-MM-DD); empty = next unprocessed day"
+        required: false
+      end:
+        description: "Last date (YYYY-MM-DD)"
+        required: false
+      stages:
+        description: "Stages to run"
+        required: false
+        default: "download,bronze,silver,gold"
+
+concurrency:
+  group: vm-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-prod:
+    name: Run Prod Pipeline
+    runs-on: self-hosted
+    timeout-minutes: 360
+    env:
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      START: ${{ inputs.start }}
+      END: ${{ inputs.end }}
+      STAGES: ${{ inputs.stages || 'download,bronze,silver,gold' }}
+
+    steps:
+      - name: Run the deployed release
+        working-directory: /opt/ais-pipeline/current
+        run: |
+          unset SPARK_HOME
+          if [ -n "$START" ]; then
+            range=(--start "$START" --end "${END:-$START}")
+          else
+            range=(--next-day)
+          fi
+          ~/ais-env-prod/bin/ais-pipeline --env prod run "${range[@]}" --stages "$STAGES"
