@@ -68,12 +68,14 @@ class FeatureSettings:
     port_call_gap_h: float
     min_port_call_min: float
     anchor_max_sog_kn: float
+    scd2_min_reports: int
 
 
 @dataclass(frozen=True)
 class RefSettings:
     ports: str
     ship_types: str
+    nav_status: str
 
 
 @dataclass(frozen=True)
