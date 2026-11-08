@@ -23,3 +23,6 @@ _delta_log/
 
 # Local CI lake
 .ais-ci/
+
+# Test reports
+pytest-report.xml

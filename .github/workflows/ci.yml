@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install
+        run: pip install -e ".[dev,dashboard]"
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format
+        run: ruff format --check .
+
+      - name: Pytest
+        run: >
+          pytest -q --cov=ais_pipeline --cov-report=term
+          --junitxml=pytest-report.xml
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-report
+          path: pytest-report.xml
+
+      - name: Test summary
+        if: always()
+        run: |
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          p = Path("pytest-report.xml")
+          if not p.exists():
+              print("### Tests\n\nNo report: pytest did not run.")
+          else:
+              root = ET.parse(p).getroot()
+              s = root if root.tag == "testsuite" else root.find("testsuite")
+              total, fail = int(s.get("tests")), int(s.get("failures"))
+              err, skip = int(s.get("errors")), int(s.get("skipped"))
+              ok = total - fail - err - skip
+              print("### Tests\n")
+              print("| Passed | Failed | Errors | Skipped | Time (s) |")
+              print("|---:|---:|---:|---:|---:|")
+              print(f"| {ok} | {fail} | {err} | {skip} | {float(s.get('time')):.1f} |")
+          EOF
