@@ -40,3 +40,27 @@ def append(df: DataFrame, path: Path | str) -> None:
     """Append rows to a Delta table, creating it on first use. Only for ops log tables."""
     df.write.format("delta").mode("append").save(str(path))
     logger.info("appended to %s", path)
+
+
+def write_partitions(
+    df: DataFrame, path: Path | str, partition_col: str, values: list[date]
+) -> None:
+    """Overwrite exactly the listed partitions (partition_col IN values) of a Delta table."""
+    if not values:
+        raise ValueError("write_partitions needs at least one partition value")
+    in_list = ", ".join(f"'{v}'" for v in sorted(values))
+    predicate = f"{partition_col} IN ({in_list})"
+    (
+        df.write.format("delta")
+        .mode("overwrite")
+        .option("replaceWhere", predicate)
+        .partitionBy(partition_col)
+        .save(str(path))
+    )
+    logger.info("wrote %s partitions %s", path, predicate)
+
+
+def overwrite(df: DataFrame, path: Path | str) -> None:
+    """Replace a whole (small, fully recomputed) Delta table in one commit."""
+    df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(str(path))
+    logger.info("overwrote %s", path)
