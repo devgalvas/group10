@@ -1,22 +1,64 @@
 name: DAT535 — Production Pipeline
 
+# A merge into main deploys a release, after a reviewer approves the `main` environment.
+# The scheduled workflow then runs the deployed release, not a checkout.
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: vm-pipeline
+  cancel-in-progress: false
 
 jobs:
   deploy-prod:
     name: Deploy to Production
     runs-on: self-hosted
     environment: main
+    timeout-minutes: 20
     env:
-      DAT535_ENV: prod
       JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      RELEASES: /opt/ais-pipeline/releases
+      CURRENT: /opt/ais-pipeline/current
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Placeholder
-        run: echo "pipeline not wired yet (AIS-38)"
+      - name: Copy the release
+        run: |
+          test -w "$RELEASES" || { echo "::error::$RELEASES is not writable (see docs/runbook.md)"; exit 1; }
+          dest="$RELEASES/$GITHUB_SHA"
+          rm -rf "$dest" && mkdir -p "$dest"
+          cp -a config ref src pyproject.toml README.md "$dest"/
+          [ -d dashboard ] && cp -a dashboard "$dest"/ || true
+
+      - name: Install the release into the prod venv
+        run: ~/ais-env-prod/bin/pip install --quiet "$RELEASES/$GITHUB_SHA[dashboard]"
+
+      - name: Switch the current symlink
+        run: |
+          # ln + mv -T replaces the link in one rename, so readers never see it missing.
+          ln -sfn "$RELEASES/$GITHUB_SHA" "$CURRENT.tmp"
+          mv -Tf "$CURRENT.tmp" "$CURRENT"
+
+      - name: Smoke check from the release
+        run: |
+          unset SPARK_HOME
+          cd "$CURRENT"
+          ~/ais-env-prod/bin/ais-pipeline --env prod check
+
+      - name: Keep the last 3 releases
+        run: |
+          ls -1dt "$RELEASES"/*/ | tail -n +4 | xargs -r rm -rf
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed release"
+            echo
+            echo "| sha | version | deployed at (UTC) |"
+            echo "|---|---|---|"
+            echo "| \`${GITHUB_SHA::12}\` | $(~/ais-env-prod/bin/ais-pipeline --version) | $(date -u '+%F %T') |"
+          } >> "$GITHUB_STEP_SUMMARY"

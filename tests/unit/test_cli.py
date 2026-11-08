@@ -19,9 +19,9 @@ def test_parser_rejects_bad_date():
         )
 
 
-def test_unimplemented_command_exits_1(monkeypatch, tmp_path):
+def test_gold_on_an_empty_lake_is_skipped(monkeypatch, tmp_path):
     monkeypatch.setenv("AIS_DATA_ROOT", str(tmp_path))
-    assert main(["--env", "ci", "gold"]) == 1
+    assert main(["--env", "ci", "gold"]) == 0
 
 
 def test_date_range_is_inclusive():
