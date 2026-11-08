@@ -26,6 +26,8 @@ def build_spark(settings: Settings) -> SparkSession:
             "org.apache.spark.sql.delta.catalog.DeltaCatalog",
         )
         .config("spark.sql.session.timeZone", "UTC")
+        # Unparseable timestamps become null (counted as BAD_TIMESTAMP) instead of raising.
+        .config("spark.sql.legacy.timeParserPolicy", "CORRECTED")
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.sql.shuffle.partitions", str(cfg.shuffle_partitions))
         .config("spark.ui.showConsoleProgress", "false")
