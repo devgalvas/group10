@@ -12,6 +12,8 @@ from ais_pipeline.silver.build import clean, run_silver_core, tag
 from ais_pipeline.silver.dedup import drop_exact
 from ais_pipeline.silver.flags import has_flag
 from ais_pipeline.silver.rules import REASON_COL
+from ais_pipeline.silver.sentinels import SENTINEL_RAW_COLS
+from ais_pipeline.silver.standardize import RAW_COL
 
 pytestmark = pytest.mark.integration
 
@@ -36,6 +38,11 @@ def test_fixture_counts(core):
     assert core.metric("silver_out", "flag_TS_CONFLICT") == 1
     assert core.metric("silver_out", "flag_SOG_SENTINEL") == 1
     assert core.metric("silver_out", "flag_HEADING_SENTINEL") == 1
+
+
+def test_clean_keeps_only_the_raw_fields_the_sentinels_read(bronze_tiny, nav_lookup):
+    cleaned = clean(tag(bronze_tiny, nav_lookup))
+    assert cleaned.schema[RAW_COL].dataType.fieldNames() == list(SENTINEL_RAW_COLS)
 
 
 def test_rows_are_conserved(spark, core, bronze_tiny, nav_lookup):
