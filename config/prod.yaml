@@ -12,6 +12,7 @@ spark:
   app_name: "ais-pipeline-prod"
   driver_memory: "5g"
   shuffle_partitions: 16
+  max_partition_bytes: "32m"    # ~18 read partitions of ~1 M rows per day (5 at 128m: heap OOM)
   event_log_dir: "file:///data/spark-events"
 quality:
   max_reject_rate: 0.05          # rejects excl. OUT_OF_SCOPE_MOBILE / rows in scope; set from AIS-16

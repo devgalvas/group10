@@ -53,6 +53,8 @@ class SparkSettings:
     driver_memory: str
     shuffle_partitions: int
     event_log_dir: str | None = None
+    # spark.sql.files.maxPartitionBytes; None keeps Spark's 128 MB default.
+    max_partition_bytes: str | None = None
 
 
 @dataclass(frozen=True)

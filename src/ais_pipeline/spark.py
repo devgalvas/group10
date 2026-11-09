@@ -32,6 +32,10 @@ def build_spark(settings: Settings) -> SparkSession:
         .config("spark.sql.shuffle.partitions", str(cfg.shuffle_partitions))
         .config("spark.ui.showConsoleProgress", "false")
     )
+    if cfg.max_partition_bytes:
+        # A prod day is ~570 MB of Bronze Parquet: at the 128 MB default that is 5 read
+        # partitions of ~3.7 M rows, and persisting one of them ran out of a 5 GB heap.
+        builder = builder.config("spark.sql.files.maxPartitionBytes", cfg.max_partition_bytes)
     if cfg.event_log_dir:
         local_dir = cfg.event_log_dir.removeprefix("file://")
         Path(local_dir).mkdir(parents=True, exist_ok=True)
