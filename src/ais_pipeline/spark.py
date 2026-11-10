@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from pathlib import Path
 
 from delta import configure_spark_with_delta_pip
@@ -32,6 +34,14 @@ def build_spark(settings: Settings) -> SparkSession:
         .config("spark.sql.shuffle.partitions", str(cfg.shuffle_partitions))
         .config("spark.ui.showConsoleProgress", "false")
     )
+    # Python workers (UDFs, RDD lambdas) must run the driver's interpreter, i.e. the project
+    # venv: left unset they start the system python3, which cannot import ais_pipeline.
+    # SparkContext reads the environment variable; an explicit setting still wins.
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+    if cfg.max_partition_bytes:
+        # A prod day is ~570 MB of Bronze Parquet: at the 128 MB default that is 5 read
+        # partitions of ~3.7 M rows, and persisting one of them ran out of a 5 GB heap.
+        builder = builder.config("spark.sql.files.maxPartitionBytes", cfg.max_partition_bytes)
     if cfg.event_log_dir:
         local_dir = cfg.event_log_dir.removeprefix("file://")
         Path(local_dir).mkdir(parents=True, exist_ok=True)

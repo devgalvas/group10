@@ -1,0 +1,42 @@
+== Physical Plan ==
+AdaptiveSparkPlan (6)
++- HashAggregate (5)
+   +- Exchange (4)
+      +- HashAggregate (3)
+         +- Project (2)
+            +- Scan parquet  (1)
+
+
+(1) Scan parquet 
+Output [2]: [zone#2024, date#2012]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/silver/vessel_position]
+PartitionFilters: [isnotnull(date#2012), (date#2012 = 2026-09-01)]
+ReadSchema: struct<zone:string>
+
+(2) Project
+Output [1]: [zone#2024]
+Input [2]: [zone#2024, date#2012]
+
+(3) HashAggregate
+Input [1]: [zone#2024]
+Keys [1]: [zone#2024]
+Functions [1]: [partial_count(1)]
+Aggregate Attributes [1]: [count#2089L]
+Results [2]: [zone#2024, count#2090L]
+
+(4) Exchange
+Input [2]: [zone#2024, count#2090L]
+Arguments: hashpartitioning(zone#2024, 16), ENSURE_REQUIREMENTS, [plan_id=951]
+
+(5) HashAggregate
+Input [2]: [zone#2024, count#2090L]
+Keys [1]: [zone#2024]
+Functions [1]: [count(1)]
+Aggregate Attributes [1]: [count(1)#2083L]
+Results [2]: [zone#2024, count(1)#2083L AS count#2084L]
+
+(6) AdaptiveSparkPlan
+Output [2]: [zone#2024, count#2084L]
+Arguments: isFinalPlan=false
+

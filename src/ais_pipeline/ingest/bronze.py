@@ -202,7 +202,9 @@ def ingest_day(
         csv_path = extract_csv(zip_path, member, extract_dir)
         raw = read_raw_csv(spark, csv_path, report)
         df = add_lineage(raw, zip_path.name, sha, day, run_id)
-        write_partition(df, bronze_path, "_source_date", day)
+        # mergeSchema: an extra source column passes the contract with a warning and is
+        # added to the table; earlier days read it as null.
+        write_partition(df, bronze_path, "_source_date", day, merge_schema=True)
     finally:
         shutil.rmtree(extract_dir, ignore_errors=True)
 

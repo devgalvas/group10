@@ -21,6 +21,12 @@ def test_all_env_files_load(env, monkeypatch):
     assert settings.spark.app_name == f"ais-pipeline-{env}"
 
 
+def test_max_partition_bytes_is_optional(monkeypatch):
+    monkeypatch.delenv("AIS_DATA_ROOT", raising=False)
+    assert load_settings("prod").spark.max_partition_bytes == "32m"
+    assert load_settings("ci").spark.max_partition_bytes is None
+
+
 def test_data_root_is_interpolated(monkeypatch):
     monkeypatch.delenv("AIS_DATA_ROOT", raising=False)
     settings = load_settings("dev")

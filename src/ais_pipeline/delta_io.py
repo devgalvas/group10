@@ -18,21 +18,32 @@ def table_exists(spark: SparkSession, path: Path | str) -> bool:
     return DeltaTable.isDeltaTable(spark, str(path))
 
 
-def write_partition(df: DataFrame, path: Path | str, partition_col: str, value: date | str) -> None:
+def write_partition(
+    df: DataFrame,
+    path: Path | str,
+    partition_col: str,
+    value: date | str,
+    merge_schema: bool = False,
+) -> None:
     """Overwrite exactly one partition (partition_col = value) of a Delta table.
 
     `replaceWhere` makes the write idempotent: rerunning a day replaces that day's rows and
     leaves every other partition untouched. Delta rejects the write if any row of df falls
     outside the partition, which guards against writing the wrong day.
+
+    With merge_schema, columns of df that the table lacks are added to it (null in the other
+    partitions). Only Bronze uses it: a new source column must not stop the daily run.
     """
     predicate = f"{partition_col} = '{value}'"
-    (
+    writer = (
         df.write.format("delta")
         .mode("overwrite")
         .option("replaceWhere", predicate)
         .partitionBy(partition_col)
-        .save(str(path))
     )
+    if merge_schema:
+        writer = writer.option("mergeSchema", "true")
+    writer.save(str(path))
     logger.info("wrote %s partition %s", path, predicate)
 
 

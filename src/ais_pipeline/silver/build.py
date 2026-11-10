@@ -23,7 +23,7 @@ from ais_pipeline.silver.dedup import TS_GROUP_COL, drop_exact, resolve_conflict
 from ais_pipeline.silver.flags import FLAG_CODES, has_flag
 from ais_pipeline.silver.refs import load_nav_status
 from ais_pipeline.silver.rules import REASON_COL, REJECT_CODES, with_reject_reason
-from ais_pipeline.silver.sentinels import apply_sentinels
+from ais_pipeline.silver.sentinels import SENTINEL_RAW_COLS, apply_sentinels
 from ais_pipeline.silver.standardize import RAW_COL, ROW_HASH_COL, SOURCE_COLS, standardize
 
 logger = logging.getLogger(__name__)
@@ -54,8 +54,18 @@ def rejects_frame(tagged: DataFrame, silver_run_id: str) -> DataFrame:
 
 
 def clean(tagged: DataFrame) -> DataFrame:
-    """Valid rows -> exact dedup -> (mmsi, ts_utc) conflicts -> sentinels."""
-    valid = tagged.where(F.col(REASON_COL).isNull()).drop(REASON_COL)
+    """Valid rows -> exact dedup -> (mmsi, ts_utc) conflicts -> sentinels.
+
+    The raw struct is cut to the fields the sentinels read: carrying all 26 raw strings
+    through the dedup sort ran a full prod day out of heap.
+    """
+    valid = (
+        tagged.where(F.col(REASON_COL).isNull())
+        .drop(REASON_COL)
+        .withColumn(
+            RAW_COL, F.struct(*[F.col(f"{RAW_COL}.{c}").alias(c) for c in SENTINEL_RAW_COLS])
+        )
+    )
     return apply_sentinels(resolve_conflicts(drop_exact(valid)))
 
 
@@ -158,13 +168,15 @@ def run_silver_core(
     """Clean one source date: bronze_in metrics, rejects written, clean rows, silver_out metrics.
 
     The tagged rows are read by three jobs (metrics, rejects, clean), so they are persisted
-    once instead of re-reading and re-parsing Bronze three times. With rdd_check, the exact
+    once instead of re-reading and re-parsing Bronze three times. They are persisted on disk
+    only: a full day (18.7 M wide rows) cached with MEMORY_AND_DISK ran out of a 5 GB heap
+    while the cache blocks were built. With rdd_check, the exact
     duplicates are recounted with RDDs (AIS-22) and logged as exact_duplicates_rdd.
     """
     bronze_df = bronze_df if bronze_df is not None else read_bronze_day(spark, settings, day)
     nav_lookup = load_nav_status(spark, settings.refs.nav_status)
 
-    tagged = tag(bronze_df, nav_lookup).persist(StorageLevel.MEMORY_AND_DISK)
+    tagged = tag(bronze_df, nav_lookup).persist(StorageLevel.DISK_ONLY)
     metrics = profile(tagged, "bronze_in", bronze_in_exprs())
     bronze_in = as_dict(metrics, "bronze_in")
     if bronze_in["rows"] == 0:
@@ -180,7 +192,7 @@ def run_silver_core(
         day,
     )
 
-    cleaned = clean(tagged).persist(StorageLevel.MEMORY_AND_DISK)
+    cleaned = clean(tagged).persist(StorageLevel.DISK_ONLY)
     metrics += profile(cleaned, "silver_out", silver_out_exprs())
     tagged.unpersist()
     metrics += derived_metrics(bronze_in, as_dict(metrics, "silver_out"))

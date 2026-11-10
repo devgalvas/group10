@@ -126,3 +126,47 @@ def test_failure_is_logged_and_raised(spark, settings):
     assert row["status"] == "failed"
     assert row["file_name"] == "aisdk-2026-09-01.zip"
     assert "FileNotFoundError" in row["message"]
+
+
+DAY2 = date(2026, 9, 2)
+
+
+def _write_day(settings, day: date, header: str, rows: list[str]) -> None:
+    folder = settings.landing_dir / f"date={day.isoformat()}"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"aisdk-{day.isoformat()}"
+    with zipfile.ZipFile(folder / f"{name}.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{name}.csv", "\n".join([header, *rows]) + "\n")
+
+
+def _day2(row: str) -> str:
+    return row.replace("01/09/2026", "02/09/2026")
+
+
+def test_extra_source_column_is_added_to_bronze(spark, settings):
+    _write_day(settings, DAY, HEADER, [GOOD.format(s=0)])
+    ingest_day(spark, settings, DAY, run_id="r1")
+    _write_day(settings, DAY2, HEADER + ",New field", [_day2(GOOD.format(s=0)) + ",x"])
+    result = ingest_day(spark, settings, DAY2, run_id="r2")
+
+    assert result.header.extra_columns == ["New field"]
+    df = _bronze(spark, settings)
+    assert "new_field" in df.columns
+    values = {r["_source_date"]: r["new_field"] for r in df.collect()}
+    assert values == {DAY: None, DAY2: "x"}
+
+
+def test_missing_optional_column_reads_as_null(spark, settings):
+    _write_day(settings, DAY, HEADER, [GOOD.format(s=0)])
+    ingest_day(spark, settings, DAY, run_id="r1")
+    cols, vals = HEADER.split(","), _day2(GOOD.format(s=0)).split(",")
+    i = cols.index("Destination")
+    _write_day(
+        settings, DAY2, ",".join(cols[:i] + cols[i + 1 :]), [",".join(vals[:i] + vals[i + 1 :])]
+    )
+    result = ingest_day(spark, settings, DAY2, run_id="r2")
+
+    assert result.header.missing_optional == ["Destination"]
+    df = _bronze(spark, settings)
+    values = {r["_source_date"]: r["destination"] for r in df.collect()}
+    assert values == {DAY: "Unknown", DAY2: None}

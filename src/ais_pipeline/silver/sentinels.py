@@ -14,6 +14,8 @@ from ais_pipeline.silver.standardize import PLACEHOLDERS, RAW_COL
 SOG_NA_KN = 102.3  # 1023 in 0.1 kn units: "not available"
 COG_NA_DEG = 360.0  # 3600 in 0.1 deg units: "not available"
 HEADING_NA_DEG = 511.0
+# The only raw fields read after validation: clean() keeps just these in RAW_COL.
+SENTINEL_RAW_COLS = ("sog", "cog", "heading")
 
 
 def _unparsed(raw_name: str, typed: str) -> Column:

@@ -1,0 +1,26 @@
+== Physical Plan ==
+* Project (4)
++- * Filter (3)
+   +- * ColumnarToRow (2)
+      +- Scan parquet  (1)
+
+
+(1) Scan parquet 
+Output [32]: [timestamp#650, type_of_mobile#651, mmsi#652, latitude#653, longitude#654, navigational_status#655, rot#656, sog#657, cog#658, heading#659, imo#660, callsign#661, name#662, ship_type#663, cargo_type#664, width#665, length#666, type_of_position_fixing_device#667, draught#668, destination#669, eta#670, data_source_type#671, a#672, b#673, c#674, d#675, _corrupt_record#676, _source_file#677, _file_sha256#678, _ingest_ts#680, _run_id#681, _source_date#679]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/bronze/ais_raw]
+PartitionFilters: [isnotnull(_source_date#679), (_source_date#679 = 2026-09-01)]
+PushedFilters: [IsNotNull(navigational_status), EqualTo(navigational_status,Moored)]
+ReadSchema: struct<timestamp:string,type_of_mobile:string,mmsi:string,latitude:string,longitude:string,navigational_status:string,rot:string,sog:string,cog:string,heading:string,imo:string,callsign:string,name:string,ship_type:string,cargo_type:string,width:string,length:string,type_of_position_fixing_device:string,draught:string,destination:string,eta:string,data_source_type:string,a:string,b:string,c:string,d:string,_corrupt_record:string,_source_file:string,_file_sha256:string,_ingest_ts:timestamp,_run_id:string>
+
+(2) ColumnarToRow [codegen id : 1]
+Input [32]: [timestamp#650, type_of_mobile#651, mmsi#652, latitude#653, longitude#654, navigational_status#655, rot#656, sog#657, cog#658, heading#659, imo#660, callsign#661, name#662, ship_type#663, cargo_type#664, width#665, length#666, type_of_position_fixing_device#667, draught#668, destination#669, eta#670, data_source_type#671, a#672, b#673, c#674, d#675, _corrupt_record#676, _source_file#677, _file_sha256#678, _ingest_ts#680, _run_id#681, _source_date#679]
+
+(3) Filter [codegen id : 1]
+Input [32]: [timestamp#650, type_of_mobile#651, mmsi#652, latitude#653, longitude#654, navigational_status#655, rot#656, sog#657, cog#658, heading#659, imo#660, callsign#661, name#662, ship_type#663, cargo_type#664, width#665, length#666, type_of_position_fixing_device#667, draught#668, destination#669, eta#670, data_source_type#671, a#672, b#673, c#674, d#675, _corrupt_record#676, _source_file#677, _file_sha256#678, _ingest_ts#680, _run_id#681, _source_date#679]
+Condition : (isnotnull(navigational_status#655) AND (navigational_status#655 = Moored))
+
+(4) Project [codegen id : 1]
+Output [32]: [timestamp#650, type_of_mobile#651, mmsi#652, latitude#653, longitude#654, navigational_status#655, rot#656, sog#657, cog#658, heading#659, imo#660, callsign#661, name#662, ship_type#663, cargo_type#664, width#665, length#666, type_of_position_fixing_device#667, draught#668, destination#669, eta#670, data_source_type#671, a#672, b#673, c#674, d#675, _corrupt_record#676, _source_file#677, _file_sha256#678, _source_date#679, _ingest_ts#680, _run_id#681]
+Input [32]: [timestamp#650, type_of_mobile#651, mmsi#652, latitude#653, longitude#654, navigational_status#655, rot#656, sog#657, cog#658, heading#659, imo#660, callsign#661, name#662, ship_type#663, cargo_type#664, width#665, length#666, type_of_position_fixing_device#667, draught#668, destination#669, eta#670, data_source_type#671, a#672, b#673, c#674, d#675, _corrupt_record#676, _source_file#677, _file_sha256#678, _ingest_ts#680, _run_id#681, _source_date#679]
+

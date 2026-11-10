@@ -165,3 +165,28 @@ context → options → decision → consequence.
 - Decision: `perf.experiments` reads `/data/ais/prod` and writes only under
   `/data/ais/perf` (`ops.perf_results`, P4 tables). Each variant has an unrecorded warm-up run,
   then 3 measured runs; the report uses the median.
+
+## D-17 Silver fits a full day in 8 GB by staying out of the heap
+- Date: 2026-11-10 · Author: Lucas · Issues: AIS-28, AIS-33
+- Context: the VM has 8 GB of RAM for the OS, a 5 GB driver (`local[4]`, executors inside the
+  driver JVM) and the Python workers. The first full-day Silver build (18.7 M Bronze rows,
+  ~570 MB of Parquet) failed three times with `java.lang.OutOfMemoryError: Java heap space`.
+  The dev sample had never shown it. Logs: `~/ais-logs/prod_run_2026-09-01.oom*.log` on the VM.
+- Decision: three changes, each made after one failure and checked with a new run:
+  1. `spark.sql.files.maxPartitionBytes` 128 MB → **32 MB** (`spark.max_partition_bytes` in
+     `config/{dev,prod}.yaml`): 18 read partitions of ~1 M rows instead of 5 of ~3.7 M, so each
+     task holds less at once.
+  2. The tagged and the clean rows are persisted with **`DISK_ONLY`** instead of the default
+     `MEMORY_AND_DISK`. They are each read by three jobs, so they are still cached. But building
+     the in-memory blocks needed more heap than one task had.
+  3. `clean()` keeps only `sog`, `cog` and `heading` in the raw struct before
+     `dropDuplicates`. The 26 verbatim string fields made the dedup sort rows too large.
+  Two more limits came from the experiments, not the pipeline. Python workers need
+  `spark.python.worker.memory=256m` (P6's RDD job was killed by the kernel without it). Each
+  full Silver build runs in its own process (P4: the third build in one session was killed).
+- Result: run `20261109T153958Z-9c7062ec` builds Silver for 2026-09-01 in 459 s with
+  `unaccounted = 0`.
+- Trade-off: `DISK_ONLY` re-reads the persisted rows from local disk on each of the three jobs.
+  On a node with more RAM, `MEMORY_AND_DISK` and the default partition size would be the first
+  things to try again.
+
