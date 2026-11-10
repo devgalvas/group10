@@ -56,14 +56,26 @@ What makes it suitable for this course is that it is **large and dirty in realis
   renaming, partly by typing errors.
 - **GPS jumps:** consecutive positions that imply impossible speeds.
 
-**Profiling of 2026-09-01 [VM]:**
-- share of each type of mobile;
-- null rate per column;
-- sentinel counts;
-- exact duplicate rate;
-- distinct MMSIs;
-- rows per hour;
-- top MMSIs by row count (skew).
+**Profiling of 2026-09-01** (full day, 18,658,332 rows, `docs/profiling_2026-09-01.md`):
+- **Type of mobile:** Class A 82.3 % of rows (2,472 MMSIs), Class B 9.6 % (3,152), base
+  stations 6.0 %, AtoN 2.1 %, SAR aircraft and transponders < 0.1 %. Base stations and AtoN
+  are out of scope for vessel traffic: 1,510,373 rows are rejected as `OUT_OF_SCOPE_MOBILE`.
+- **Missing values** are frequent but concentrated in voyage and static fields: `cargo_type`
+  84 %, `imo` 48 % (as placeholder text), `eta` 43 %, `heading` 27 %, `navigational_status`
+  23 % ("Unknown value"). Position, timestamp and MMSI are never missing.
+- **Sentinels:** `lat = 91` ("not available") in 82,708 rows, SOG ≥ 102.3 in 2,497,
+  heading 360–510 in 10,765. 8.8 % of rows have an MMSI that is not 9 digits starting 2–7,
+  mostly base stations and AtoN.
+- **Duplicates:** 7,243,526 rows (38.8 %) are exact copies of another row, because several
+  receivers hear the same broadcast. 56,978 `(mmsi, ts_utc)` keys carry different contents
+  (114,878 rows, 0.6 %).
+- **Rows per hour** follow the working day: 656,661 at 21:00 UTC to 863,978 at 11:00. All 24
+  hours are present.
+- **Distinct MMSIs:** 5,369 in the raw text. Per MMSI, a median of 806 rows, p99 28,957, max
+  77,938. The top MMSI is a base station, and the top 15 hold 4.1 % of the rows. After
+  cleaning, the largest vessel has 0.22 % of the day (P3).
+- **Reference text:** one navigational status (`AIS-SART (active)`, 1 row) was missing from
+  the mapping and was added. Every ship-type text was already mapped.
 
 One profile result is already measured (`docs/profiling.md`): traffic concentrates near the
 ports. **4.8 %** of the day lies within 15 km of the three ports, and going from 25 km to
@@ -183,31 +195,32 @@ Each checkpoint is **one aggregation pass** of conditional sums, so the metrics 
 instead of one per metric. Row conservation is **measured, not derived** (D-11): each term is
 counted by a different measurement, and the logged `unaccounted` must be 0.
 
-| | fixture (259 rows, `tests/fixtures/ais_tiny.csv`) | dev sample of 2026-09-01 (real rows, D-07) | full day 2026-09-01 **[VM]** |
+| | fixture (259 rows, `tests/fixtures/ais_tiny.csv`) | dev sample of 2026-09-01 (real rows, D-07) | full day 2026-09-01 (run `20261109T153958Z-9c7062ec`) |
 |---|---:|---:|---:|
 | rows in | 259 | 976,985 | 18,658,332 |
-| rejected | 7 | 33,178 (3.4 %) | |
-| · `OUT_OF_SCOPE_MOBILE` | | 16,080 | |
-| · `BAD_MMSI` | | 17,010 | |
-| · `POSITION_SENTINEL` | | 88 | |
-| · `BAD_TIMESTAMP`, `TS_OUTSIDE_FILE_DAY`, `BAD_POSITION`, `MALFORMED_ROW` | | 0 | |
-| exact duplicates removed | 2 | 230,211 (23.6 %) | |
-| conflicts dropped | 1 | 3,427 | |
-| accepted | **249** | **710,169** | |
-| unaccounted | 0 | **0** | |
-| heading sentinels nulled (`HEADING_SENTINEL`) | 1 | 5,973 | |
+| rejected | 7 | 33,178 (3.4 %) | 1,663,609 (8.9 %) |
+| · `OUT_OF_SCOPE_MOBILE` | | 16,080 | 1,510,373 |
+| · `BAD_MMSI` | | 17,010 | 135,890 |
+| · `POSITION_SENTINEL` | | 88 | 17,346 |
+| · `BAD_TIMESTAMP`, `TS_OUTSIDE_FILE_DAY`, `BAD_POSITION`, `MALFORMED_ROW` | | 0 | 0 |
+| exact duplicates removed | 2 | 230,211 (23.6 %) | 6,211,222 (33.3 %) |
+| conflicts dropped | 1 | 3,427 | 47,734 |
+| accepted | **249** | **710,169** | **10,735,767** |
+| unaccounted | 0 | **0** | **0** |
+| heading sentinels nulled (`HEADING_SENTINEL`) | 1 | 5,973 | 5,976 |
 | SOG / COG sentinels nulled | 1 / 0 | 0 / 0 | |
-| `POSITION_JUMP` flagged | 2 | 1,269 | |
-| in-scope reject rate (gate ≤ 5 %) | 1.56 % | 1.78 % | |
+| `POSITION_JUMP` flagged | 2 | 1,269 | 26,356 |
+| in-scope reject rate (gate ≤ 5 %) | 1.56 % | 1.78 % | 0.89 % |
 | distinct MMSI in → out | 178 → 174 | 4,171 → 3,948 | |
-| `dim_vessel` versions inserted | 4 | 3,574 | |
-| Silver wall time | | 60.1 s | |
+| `dim_vessel` versions inserted | 4 | 3,574 | 5,687 |
+| Silver wall time | | 60.1 s | 459 s |
 
 The dev-sample column comes from the first automated run of `dat535-dev.yml` on the VM
 (8 Nov 2026, run 42524555514, 2 min 17 s end to end, bronze → silver → gold). Three
 observations from it:
-- **Exact duplicates are about a quarter of the rows near the ports.** Several base stations
-  hear the same ship, which is why exact dedup comes before every other step.
+- **Exact duplicates are a quarter of the rows near the ports and a third of the full day**
+  (23.6 % vs 33.3 %). Several base stations hear the same ship, which is why exact dedup comes
+  before every other step.
 - **`BAD_MMSI` is the largest reject code.** **[VM: check on the full day whether these are
   invalid MMSIs from Class B transponders.]**
 - **`exact_duplicates` differs between the two checkpoints.** At `bronze_in` it counts copies
@@ -234,7 +247,11 @@ WHEN NOT MATCHED AND s._action = 'insert' THEN INSERT (…) VALUES (…)
 ```
 
 Positions find their version with an **as-of join**: `ts_utc` between `valid_from` and
-`valid_to`.
+`valid_to`. On 2026-09-01, 45,797 of 10,735,767 positions (0.43 %, metric `null_vessel_sk`)
+have no version. Either the vessel sent no combination of static attributes twice that day,
+or the fix comes before its first sighting. These positions are kept with a null key, not
+rejected: the position itself is valid. Gold builds port calls and congestion by `mmsi`, so
+these rows still count. They only lack the vessel type in the per-type breakdowns.
 
 **Movement features:**
 - `gap_s`, `step_km` and `implied_speed_kn` come from `lag` over a per-MMSI window;
@@ -420,8 +437,13 @@ summary, the backfill row counts.]**
 ## 9. Limitations
 
 - **Port areas are circles** around a hand-picked centre. Berths and anchorages are
-  irregular, so a few positions near the edge are misassigned. **[VM: centre refinement
-  result.]**
+  irregular, so a few positions near the edge are misassigned. The profile checked the centres
+  against where `moored` vessels actually lie: the median moored position is 0.32 km (DKEBJ),
+  0.67 km (DKCPH) and 0.96 km (DKAAR) from the centre, so the centres were kept. The radius
+  fits Aarhus (100 % of moored fixes inside the port circle) and Esbjerg (87.5 %), but not
+  Copenhagen: its quays spread along the coast (p90 6.18 km from the centre), and only 66 % of
+  its moored fixes fall inside the 3 km circle. Port calls in Copenhagen are therefore
+  undercounted; one polygon per port (or several circles) would fix it.
 - **One region and a short window:** three Danish ports and **[VM: N]** days. Seasonal
   patterns are out of reach.
 - **Static attribute noise:** with a minimum of 2 reports per version, a persistent typing
@@ -465,5 +487,6 @@ summary, the backfill row counts.]**
 | D-14 | port calls split on time away from the port |
 | D-15 | Gold publishes only gated dates |
 | D-16 | experiments never write to the prod lake |
+| D-17 | Silver fits a full day in 8 GB by staying out of the heap |
 
 Full entries: `docs/decisions.md`.
