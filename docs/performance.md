@@ -11,7 +11,7 @@ VM (`local[4]`, 5 GB driver), from the Spark event log in the History Server (po
 | P3 | Skew in the per-vessel window | AIS-32 | rejected: largest MMSI 0.22 % of the day; `repartition(16)` 2.6 vs 3.5 s via the exchange type |
 | P4 | Shuffle partitions sized for 4 cores | AIS-33 | not supported: 480–525 s for all six variants, within run-to-run noise; spill grows as partitions shrink |
 | P5 | Python UDF vs built-in functions (haversine) | AIS-33 | confirmed: 0.8 s built-in, 1.9 s pandas UDF, 6.1 s Python UDF |
-| P6 | RDD vs DataFrame duplicate count | AIS-22 | confirmed: 27.8 vs 203.0 s; the RDD spills 15.4 GB |
+| P6 | RDD vs DataFrame duplicate count | AIS-22 | confirmed: 27.8 vs 203.0 s; the RDD spills ~1.9 GB to disk per run, `distinct()` none |
 
 The reasoning for each experiment (hypothesis → baseline → change → result → verdict) is in
 `docs/report.md` §6. The physical plans are in `docs/perf/plans/`, and the per-MMSI
@@ -25,6 +25,13 @@ Output of `python -m perf.report --env prod --out-root /data/ais/perf` after the
 - **P4:** one run per variant, each in its own process, without warm-up. The
   `silver_sp200_coalesce_on` row has two runs: 493.2 s (9 Nov, after a warm-up, in a shared
   session) and 570.5 s (10 Nov, first cold build). The report shows the lower one.
+- **`spill (MB)`** is `memoryBytesSpilled + diskBytesSpilled` from the REST API. The memory
+  term is the deserialized size of the spilled data, so the column overstates what reaches
+  the disk. The bytes actually written to disk, read from the event logs
+  (`/data/spark-events`): P4 130 (200 on), 129 (64 on), 301 (16 on), 4,811 (8 on), 0 (200 off),
+  31 (16 off); P6 RDD ~1,900 per run; P3 before/after dedup ~880 / ~24 per run.
+- **Task counts** of the P4 shuffle stages (event log): see the table in `docs/report.md` §6.
+  The P3 base window runs 5 tasks after AQE coalescing; `repartition(n)` keeps n.
 - **P5 `builtin`:** 6 runs, because it was measured in both P5 runs. The P5 UDF variants
   failed in the first run (`ModuleNotFoundError` in the Python workers) and passed in the
   second.

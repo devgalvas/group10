@@ -64,7 +64,9 @@ What makes it suitable for this course is that it is **large and dirty in realis
   84 %, `imo` 48 % (as placeholder text), `eta` 43 %, `heading` 27 %, `navigational_status`
   23 % ("Unknown value"). Position, timestamp and MMSI are never missing.
 - **Sentinels:** `lat = 91` ("not available") in 82,708 rows, SOG ≥ 102.3 in 2,497,
-  heading 360–510 in 10,765. 8.8 % of rows have an MMSI that is not 9 digits starting 2–7,
+  heading 360–510 in 10,765. The high SOG values are not sentinels: 2,454 come from SAR
+  aircraft (real speeds of 106–165 kn, out of scope) and 43 from invalid MMSIs. No in-scope
+  row reaches 102.3; the maximum `sog_kn` in Silver is 102.2. 8.8 % of rows have an MMSI that is not 9 digits starting 2–7,
   mostly base stations and AtoN.
 - **Duplicates:** 7,243,526 rows (38.8 %) are exact copies of another row, because several
   receivers hear the same broadcast. 56,978 `(mmsi, ts_utc)` keys carry different contents
@@ -208,10 +210,10 @@ counted by a different measurement, and the logged `unaccounted` must be 0.
 | accepted | **249** | **710,169** | **10,735,767** |
 | unaccounted | 0 | **0** | **0** |
 | heading sentinels nulled (`HEADING_SENTINEL`) | 1 | 5,973 | 5,976 |
-| SOG / COG sentinels nulled | 1 / 0 | 0 / 0 | |
+| SOG / COG sentinels nulled | 1 / 0 | 0 / 0 | 0 / 0 |
 | `POSITION_JUMP` flagged | 2 | 1,269 | 26,356 |
 | in-scope reject rate (gate ≤ 5 %) | 1.56 % | 1.78 % | 0.89 % |
-| distinct MMSI in → out | 178 → 174 | 4,171 → 3,948 | |
+| distinct MMSI in → out | 178 → 174 | 4,171 → 3,948 | 5,369 → 5,040 |
 | `dim_vessel` versions inserted | 4 | 3,574 | 5,687 |
 | Silver wall time | | 60.1 s | 459 s |
 
@@ -221,8 +223,12 @@ observations from it:
 - **Exact duplicates are a quarter of the rows near the ports and a third of the full day**
   (23.6 % vs 33.3 %). Several base stations hear the same ship, which is why exact dedup comes
   before every other step.
-- **`BAD_MMSI` is the largest reject code.** **[VM: check on the full day whether these are
-  invalid MMSIs from Class B transponders.]**
+- **`BAD_MMSI` is the largest in-scope reject code, and it comes from very few transmitters.**
+  On the full day, its 135,890 rows come from 25 MMSIs: 12 that report as Class A (121,263
+  rows) and 13 as Class B (14,627). Most are special-purpose identifiers, not vessels: the
+  `111` prefix (SAR aircraft), `99` (aids to navigation), `970` (AIS-SART) and a 7-digit
+  base-station number. One misconfigured transponder (`3638`) alone sends 43,944 rows.
+  Rejecting them is correct: none can be joined to a vessel.
 - **`exact_duplicates` differs between the two checkpoints.** At `bronze_in` it counts copies
   among all rows (237,613); `exact_duplicates_removed` counts them only among the valid rows
   (230,211). The 7,402 difference are copies of rows that were rejected anyway.
@@ -280,9 +286,9 @@ trigonometry; its gain is measured in P2.
 
 | | count | covers |
 |---|---:|---|
-| unit | 144 | every reject code (positive and negative case), priority, DataFrame = SQL, dedup tie-break, sentinels at their boundaries, haversine, zones, gates, CLI, perf harness |
+| unit | 145 | every reject code (positive and negative case), priority, DataFrame = SQL, dedup tie-break, sentinels at their boundaries, haversine, zones, gates, CLI, perf harness and event-log reader |
 | integration | 36 | Bronze ingest, idempotency and schema evolution, row conservation recounted term by term, SCD2 with a planted name change, full Silver rerun gives identical rows, Gold reconciliation, stale gate, dashboard render |
-| **total** | **180** | run on every PR by `ci.yml` (about 2 min for the setup PR, about 10 min for the full suite) |
+| **total** | **181** | run on every PR by `ci.yml` (about 2 min for the setup PR, about 10 min for the full suite) |
 
 ### 5.8 Scalability: volume, late data, schema change
 
@@ -372,25 +378,27 @@ positions each (p99 12,184). The largest MMSI has 23,213 rows, 0.22 % of the day
 `repartition(16, "mmsi")` does help: 2.6 vs 3.5 s, max task 1.5 → 0.6 s. Both plans shuffle on
 `hashpartitioning(mmsi, 16)` with the same 193 MB. The difference is the exchange type:
 `ENSURE_REQUIREMENTS` in the base plan, which AQE may coalesce into fewer, larger partitions,
-and `REPARTITION_BY_NUM` with the explicit repartition, which it may not. With 193 MB to
-shuffle, coalescing probably leaves fewer tasks than the 4 cores. 32 and 64 partitions give
-the same 2.6–2.7 s. On the full Silver build (P4), the same effect shows as spill, not time.
+and `REPARTITION_BY_NUM` with the explicit repartition, which it may not. The event log
+confirms it: AQE merges the 16 partitions of 193 MB into 5 tasks. On 4 cores that is two
+waves, and the second runs a single task. The explicit repartition keeps 16 balanced tasks.
+32 and 64 partitions give the same 2.6–2.7 s. On the full Silver build (P4), the same effect shows as spill, not time.
 The last pair compares the window on valid rows before and after deduplication, both built
 from Bronze. Deduplicating first costs 383 s vs 312 s, but it is required for correctness: an
 exact duplicate gives a gap of 0 s, so `implied_speed_kn` is null and the `POSITION_JUMP`
 check cannot see that row. Deduplication stays before the window.
 
 **P4: shuffle partitions.** Each variant is one full Silver build of the day, run once in its
-own process (10 Nov 2026):
+own process (10 Nov 2026). Task counts and the bytes written to disk by spills come from
+the Spark event log of each run:
 
-| shuffle partitions | AQE coalescing | wall (s) | spill (MB) | max task (s) |
-|---:|---|---:|---:|---:|
-| 200 | on | 493 / 570 | 2,586 | 45.0 / 54.8 |
-| 64 | on | 525 | 1,914 | 50.1 |
-| 16 | on | 503 | 10,352 | 51.2 |
-| 8 | on | 503 | 25,627 | 47.9 |
-| 200 | off | 510 | 0 | 45.4 |
-| 16 | off | 480 | 5,670 | 45.5 |
+| shuffle partitions | AQE coalescing | wall (s) | tasks in the 3 large shuffles | tasks in the last stage | spilled to disk (MB) |
+|---:|---|---:|---|---:|---:|
+| 200 | on | 493 / 570 | 25 / 50 / 200 | 7 | 130 |
+| 64 | on | 525 | 32 / 64 / 64 | 6 | 129 |
+| 16 | on | 503 | 16 / 16 / 16 | 6 | 301 |
+| 8 | on | 503 | 8 / 8 / 8 | 8 | 4,811 |
+| 200 | off | 510 | 200 / 200 / 200 | 200 | 0 |
+| 16 | off | 480 | 16 / 16 / 16 | 16 | 31 |
 
 The hypothesis is not supported. Every variant takes 480–525 s. The one configuration measured
 twice (200, coalescing on: 493 s after a warm-up on 9 Nov, 570 s as the first build of the
@@ -398,14 +406,17 @@ day on 10 Nov) varies more than the variants differ from each other. With one ru
 variant, no setting is measurably faster. The wall time is set by the longest tasks
 (45–55 s): parsing the raw strings and sorting for the deduplication. The number of
 partitions after the shuffle does not change those tasks.
-What the setting does change is **spill**. Fewer partitions are larger, and 8 partitions
-spill 25.6 GB to disk against 0 for 200 without coalescing. The spill costs little time here
-because the VM's local disk absorbs it. With coalescing on, 16 partitions spill almost twice
-as much as with it off (10.4 vs 5.7 GB). That matches the P3 reading: AQE merges the 16
-partitions into fewer, larger ones. `config/prod.yaml` keeps 16 partitions: it is the fastest
-of the six runs (16, off), and the production build of the same day took 459 s with it. This
-is a choice within the noise, not a measured gain. A firm answer would need 3+ runs per
-variant, about 35 minutes of VM time each (3.5 hours for the six).
+What the setting does change is the size of each task, and so the **spill**. The three
+large shuffles move 1.5, 2.8 and 2.5 GB. With 8 partitions each task holds ~350 MB and
+spills 4.8 GB to disk in total; with 200 and no coalescing nothing spills. The spill costs
+little time here because the VM's local disk absorbs it. Coalescing leaves the large
+shuffles alone at 16 partitions: each partition is already above AQE's 64 MB target. It
+only shrinks the small last stage, the per-vessel window before the write, from 16 tasks to
+6. That is the P3 effect again, and the extra spill (301 vs 31 MB) comes from it.
+`config/prod.yaml` keeps 16 partitions: it is the fastest of the six runs (16, off), and the
+production build of the same day took 459 s with it. This is a choice within the noise, not
+a measured gain. A firm answer would need 3+ runs per variant, about 35 minutes of VM time
+each (3.5 hours for the six).
 
 **P5: UDFs.** Haversine distance to Esbjerg over 10.7 M positions: built-in functions 0.8 s,
 pandas UDF 1.9 s (`ArrowEvalPython`, vectorised batches through Arrow), plain Python UDF 6.1 s
@@ -415,7 +426,8 @@ pandas UDF 1.9 s (`ArrowEvalPython`, vectorised batches through Arrow), plain Py
 **P6: RDD vs DataFrame.** Counting exact duplicates in the 18.7 M Bronze rows takes 203.0 s with
 `map` + `reduceByKey` and 27.8 s with `distinct()`. The RDD version shuffles less (1,269 vs
 2,519 MB), because `reduceByKey` combines on the map side. It is still 7.3× slower: every row
-becomes a pickled Python tuple, and the Python workers spilled 15,397 MB. Its first attempt
+becomes a pickled Python tuple, and the shuffle spills: about 1.9 GB written to disk per
+run, against none for `distinct()`. Its first attempt
 had the JVM killed by the kernel. It finished with `spark.python.worker.memory=256m`. The
 pipeline counts duplicates with DataFrames. The RDD count runs only behind `--rdd-check`, as an
 independent cross-check of the same number (§5.6).
