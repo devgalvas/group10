@@ -1,0 +1,47 @@
+== Physical Plan ==
+AdaptiveSparkPlan (7)
++- HashAggregate (6)
+   +- Exchange (5)
+      +- HashAggregate (4)
+         +- Project (3)
+            +- Filter (2)
+               +- Scan parquet  (1)
+
+
+(1) Scan parquet 
+Output [3]: [ts_utc#2011, zone#2024, date#2012]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/silver/vessel_position]
+PushedFilters: [IsNotNull(ts_utc), GreaterThanOrEqual(ts_utc,2026-09-01 00:00:00.0), LessThan(ts_utc,2026-09-02 00:00:00.0)]
+ReadSchema: struct<ts_utc:timestamp,zone:string>
+
+(2) Filter
+Input [3]: [ts_utc#2011, zone#2024, date#2012]
+Condition : ((isnotnull(ts_utc#2011) AND (ts_utc#2011 >= 2026-09-01 00:00:00)) AND (ts_utc#2011 < 2026-09-02 00:00:00))
+
+(3) Project
+Output [1]: [zone#2024]
+Input [3]: [ts_utc#2011, zone#2024, date#2012]
+
+(4) HashAggregate
+Input [1]: [zone#2024]
+Keys [1]: [zone#2024]
+Functions [1]: [partial_count(1)]
+Aggregate Attributes [1]: [count#3823L]
+Results [2]: [zone#2024, count#3824L]
+
+(5) Exchange
+Input [2]: [zone#2024, count#3824L]
+Arguments: hashpartitioning(zone#2024, 16), ENSURE_REQUIREMENTS, [plan_id=1348]
+
+(6) HashAggregate
+Input [2]: [zone#2024, count#3824L]
+Keys [1]: [zone#2024]
+Functions [1]: [count(1)]
+Aggregate Attributes [1]: [count(1)#3817L]
+Results [2]: [zone#2024, count(1)#3817L AS count#3818L]
+
+(7) AdaptiveSparkPlan
+Output [2]: [zone#2024, count#3818L]
+Arguments: isFinalPlan=false
+

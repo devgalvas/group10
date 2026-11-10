@@ -1,0 +1,30 @@
+== Physical Plan ==
+* Project (5)
++- BatchEvalPython (4)
+   +- * Project (3)
+      +- * ColumnarToRow (2)
+         +- Scan parquet  (1)
+
+
+(1) Scan parquet 
+Output [3]: [lat#53, lon#54, date#50]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/silver/vessel_position]
+PartitionFilters: [isnotnull(date#50), (date#50 = 2026-09-01)]
+ReadSchema: struct<lat:double,lon:double>
+
+(2) ColumnarToRow [codegen id : 1]
+Input [3]: [lat#53, lon#54, date#50]
+
+(3) Project [codegen id : 1]
+Output [2]: [lat#53, lon#54]
+Input [3]: [lat#53, lon#54, date#50]
+
+(4) BatchEvalPython
+Input [2]: [lat#53, lon#54]
+Arguments: [<lambda>(lat#53, lon#54)#1960], [pythonUDF0#2305]
+
+(5) Project [codegen id : 2]
+Output [1]: [pythonUDF0#2305 AS km#1961]
+Input [3]: [lat#53, lon#54, pythonUDF0#2305]
+

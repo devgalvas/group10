@@ -1,0 +1,20 @@
+== Physical Plan ==
+* Project (3)
++- * ColumnarToRow (2)
+   +- Scan parquet  (1)
+
+
+(1) Scan parquet 
+Output [3]: [lat#53, lon#54, date#50]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/silver/vessel_position]
+PartitionFilters: [isnotnull(date#50), (date#50 = 2026-09-01)]
+ReadSchema: struct<lat:double,lon:double>
+
+(2) ColumnarToRow [codegen id : 1]
+Input [3]: [lat#53, lon#54, date#50]
+
+(3) Project [codegen id : 1]
+Output [1]: [(12742.0176 * ASIN(SQRT((POWER(SIN(((0.9680643229111748 - RADIANS(lat#53)) / 2.0)), 2.0) + ((COS(RADIANS(lat#53)) * 0.5668951834947029) * POWER(SIN(((0.14713125594312199 - RADIANS(lon#54)) / 2.0)), 2.0)))))) AS km#99]
+Input [3]: [lat#53, lon#54, date#50]
+

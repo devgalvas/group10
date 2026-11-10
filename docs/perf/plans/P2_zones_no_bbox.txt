@@ -1,0 +1,63 @@
+== Physical Plan ==
+AdaptiveSparkPlan (11)
++- Project (10)
+   +- BroadcastNestedLoopJoin LeftOuter BuildRight (9)
+      :- Project (2)
+      :  +- Scan parquet  (1)
+      +- BroadcastExchange (8)
+         +- Project (7)
+            +- Filter (6)
+               +- InMemoryTableScan (3)
+                     +- InMemoryRelation (4)
+                           +- Scan csv  (5)
+
+
+(1) Scan parquet 
+Output [5]: [mmsi#48L, ts_utc#49, lat#53, lon#54, date#50]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/silver/vessel_position]
+PartitionFilters: [isnotnull(date#50), (date#50 = 2026-09-01)]
+ReadSchema: struct<mmsi:bigint,ts_utc:timestamp,lat:double,lon:double>
+
+(2) Project
+Output [4]: [mmsi#48L, ts_utc#49, lat#53, lon#54]
+Input [5]: [mmsi#48L, ts_utc#49, lat#53, lon#54, date#50]
+
+(3) InMemoryTableScan
+Output [5]: [anchorage_radius_km#4583, lat#4580, lon#4581, port_id#4578, port_radius_km#4582]
+Arguments: [anchorage_radius_km#4583, lat#4580, lon#4581, port_id#4578, port_radius_km#4582], [isnotnull(lat#4580), isnotnull(lon#4581), isnotnull(anchorage_radius_km#4583)]
+
+(4) InMemoryRelation
+Arguments: [port_id#4578, name#4579, lat#4580, lon#4581, port_radius_km#4582, anchorage_radius_km#4583], CachedRDDBuilder(org.apache.spark.sql.execution.columnar.DefaultCachedBatchSerializer@2bf3736b,StorageLevel(disk, memory, deserialized, 1 replicas),FileScan csv [port_id#4578,name#4579,lat#4580,lon#4581,port_radius_km#4582,anchorage_radius_km#4583] Batched: false, DataFilters: [], Format: CSV, Location: InMemoryFileIndex(1 paths)[file:/home/ubuntu/group10/ref/ports.csv], PartitionFilters: [], PushedFilters: [], ReadSchema: struct<port_id:string,name:string,lat:double,lon:double,port_radius_km:double,anchorage_radius_km...
+,None)
+
+(5) Scan csv 
+Output [6]: [port_id#4578, name#4579, lat#4580, lon#4581, port_radius_km#4582, anchorage_radius_km#4583]
+Batched: false
+Location: InMemoryFileIndex [file:/home/ubuntu/group10/ref/ports.csv]
+ReadSchema: struct<port_id:string,name:string,lat:double,lon:double,port_radius_km:double,anchorage_radius_km:double>
+
+(6) Filter
+Input [5]: [anchorage_radius_km#4583, lat#4580, lon#4581, port_id#4578, port_radius_km#4582]
+Condition : ((isnotnull(lat#4580) AND isnotnull(lon#4581)) AND isnotnull(anchorage_radius_km#4583))
+
+(7) Project
+Output [5]: [port_id#4578, lat#4580 AS _p_lat#6519, lon#4581 AS _p_lon#6520, port_radius_km#4582 AS _p_port_r#6521, anchorage_radius_km#4583 AS _p_anch_r#6522]
+Input [5]: [anchorage_radius_km#4583, lat#4580, lon#4581, port_id#4578, port_radius_km#4582]
+
+(8) BroadcastExchange
+Input [5]: [port_id#4578, _p_lat#6519, _p_lon#6520, _p_port_r#6521, _p_anch_r#6522]
+Arguments: IdentityBroadcastMode, [plan_id=2634]
+
+(9) BroadcastNestedLoopJoin
+Join type: LeftOuter
+Join condition: ((12742.0176 * ASIN(SQRT((POWER(SIN(((RADIANS(_p_lat#6519) - RADIANS(lat#53)) / 2.0)), 2.0) + ((COS(RADIANS(lat#53)) * COS(RADIANS(_p_lat#6519))) * POWER(SIN(((RADIANS(_p_lon#6520) - RADIANS(lon#54)) / 2.0)), 2.0)))))) <= _p_anch_r#6522)
+
+(10) Project
+Output [7]: [mmsi#48L, ts_utc#49, lat#53, lon#54, port_id#4578, CASE WHEN isnull(port_id#4578) THEN at_sea WHEN ((12742.0176 * ASIN(SQRT((POWER(SIN(((RADIANS(_p_lat#6519) - RADIANS(lat#53)) / 2.0)), 2.0) + ((COS(RADIANS(lat#53)) * COS(RADIANS(_p_lat#6519))) * POWER(SIN(((RADIANS(_p_lon#6520) - RADIANS(lon#54)) / 2.0)), 2.0)))))) <= _p_port_r#6521) THEN port ELSE anchorage END AS zone#6562, CASE WHEN isnotnull(port_id#4578) THEN (12742.0176 * ASIN(SQRT((POWER(SIN(((RADIANS(_p_lat#6519) - RADIANS(lat#53)) / 2.0)), 2.0) + ((COS(RADIANS(lat#53)) * COS(RADIANS(_p_lat#6519))) * POWER(SIN(((RADIANS(_p_lon#6520) - RADIANS(lon#54)) / 2.0)), 2.0)))))) END AS port_distance_km#6577]
+Input [9]: [mmsi#48L, ts_utc#49, lat#53, lon#54, port_id#4578, _p_lat#6519, _p_lon#6520, _p_port_r#6521, _p_anch_r#6522]
+
+(11) AdaptiveSparkPlan
+Output [7]: [mmsi#48L, ts_utc#49, lat#53, lon#54, port_id#4578, zone#6562, port_distance_km#6577]
+Arguments: isFinalPlan=false
+
