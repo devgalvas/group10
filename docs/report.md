@@ -277,19 +277,71 @@ trigonometry; its gain is measured in P2.
 - The formatted physical plan of each variant is saved.
 - Each variant gets one unrecorded warm-up run, then 3 measured runs; the results are
   appended to `ops.perf_results`, and the report uses the median.
+- P4 is the exception: each variant is a full Silver build (~8 min). It runs once, without
+  warm-up, in its own process. Several builds in one process exhausted the VM's 8 GB.
 - The input is the prod day 2026-09-01. Experiments write only under `/data/ais/perf`.
 
-| exp | hypothesis | variants | result **[VM]** | verdict |
-|---|---|---|---|---|
-| P1 | Delta + partition pruning reads far less than the CSV | CSV vs Bronze Delta; partition filter vs an expression on the date | | |
-| P2 | broadcasting small dimensions avoids a shuffle; the bounding box skips most trigonometry | as-of join broadcast vs sort-merge; zones with/without the bbox | | |
-| P3 | the per-vessel window is skewed by a few chatty MMSIs | base, AQE skew off, explicit repartition, before vs after dedup | | |
-| P4 | 200 shuffle partitions is too many for 4 cores | full Silver with 200 / 64 / 16 / 8, coalescing on/off | | |
-| P5 | a Python UDF is slower than built-ins | haversine built-in vs Python UDF vs pandas UDF | | |
-| P6 | the RDD path costs more than DataFrame | duplicates: `reduceByKey` vs `distinct` | | |
+All numbers are medians from `ops.perf_results` (run 9–10 Nov 2026). The full table and the
+saved physical plans are in `docs/performance.md` and `docs/perf/plans/`.
 
-**[VM: one paragraph per experiment: the number that decided it, a plan excerpt or Spark UI
-screenshot, and what was kept in the code.]**
+| exp | hypothesis | best vs baseline (median wall) | verdict |
+|---|---|---|---|
+| P1 | Delta + partition pruning reads far less than the CSV | Delta 0.8 s / 13 MB vs CSV 5.4 s / 3,343 MB | confirmed |
+| P2 | broadcasting small dimensions avoids a shuffle | broadcast 1.4 s vs sort-merge 2.3 s (190 MB shuffle) | confirmed, kept |
+| P2 | the bounding box skips most trigonometry | 1.2 s vs 1.4 s | small gain, kept |
+| P3 | the per-vessel window is skewed by a few chatty MMSIs | largest MMSI = 0.22 % of the day | rejected |
+| P4 | 200 shuffle partitions is too many for 4 cores | 200: 493 s · **[P4 running]** | **[P4]** |
+| P5 | a Python UDF is slower than built-ins | built-in 0.8 s · pandas UDF 1.9 s · Python UDF 6.1 s | confirmed |
+| P6 | the RDD path costs more than DataFrame | `distinct` 27.8 s vs `reduceByKey` 203.0 s | confirmed |
+
+**P1: raw format and pruning.** The same filter and count (`navigational_status = 'Moored'`)
+reads the whole 3,343 MB CSV in 5.4 s. On Bronze Delta it takes 0.8 s and reads 13 MB.
+Parquet reads only the needed column, and the filter is pushed down to the scan
+(`PushedFilters: EqualTo(navigational_status,Moored)` in the plan). On Silver, a filter on the
+partition column `date` reads 1 MB (`PartitionFilters` in the plan). The same day written as a
+range on `ts_utc` reads 27 MB: Delta's file statistics still skip files, but the partition
+column skips them for free. Silver holds one day so far, so the time difference (0.5 vs 0.6 s)
+is noise. **[repeat P1 c/d after the backfill: with 8 days, pruning should read 1/8 of the
+table]**
+
+**P2: joins.** The as-of join of positions to `dim_vessel` takes 1.4 s as a
+`BroadcastHashJoin`. Forced to a `SortMergeJoin`, it takes 2.3 s and shuffles 190 MB on each
+side. `dim_vessel` has 5,687 rows, so broadcasting it costs nothing. The code keeps explicit
+`F.broadcast` hints on `dim_vessel`, `dim_port` and both reference tables. The bounding-box
+prefilter in the zone join cuts the time from 1.4 to 1.2 s (median task 0.48 → 0.28 s). With
+three ports the gain is small, but it grows with the number of ports, so it stays.
+
+**P3: skew.** The hypothesis was wrong. On 2026-09-01, 5,040 vessels report a median of 705
+positions each (p99 12,184). The largest MMSI has 23,213 rows, 0.22 % of the day
+(`docs/perf/p3_rows_per_mmsi_2026-09-01.md`). Turning AQE skew handling off changes nothing
+(3.1 vs 3.5 s). The skew optimisation acts on joins, not windows. An explicit
+`repartition(16, "mmsi")` does help: 2.6 vs 3.5 s, max task 1.5 → 0.6 s. Both plans shuffle on
+`hashpartitioning(mmsi, 16)` with the same 193 MB. The difference is the exchange type:
+`ENSURE_REQUIREMENTS` in the base plan, which AQE may coalesce into fewer, larger partitions,
+and `REPARTITION_BY_NUM` with the explicit repartition, which it may not. With 193 MB to
+shuffle, coalescing probably leaves fewer tasks than the 4 cores. 32 and 64 partitions give
+the same 2.6–2.7 s. P4 tests the same effect on the full Silver build.
+The last pair compares the window on valid rows before and after deduplication, both built
+from Bronze. Deduplicating first costs 383 s vs 312 s, but it is required for correctness: an
+exact duplicate gives a gap of 0 s, so `implied_speed_kn` is null and the `POSITION_JUMP`
+check cannot see that row. Deduplication stays before the window.
+
+**P4: shuffle partitions.** **[P4 running: one variant per process. All 8 variants in one
+process got the JVM OOM-killed on the third Silver build. Fill in: 200/64/16/8 with coalescing
+on, 200/16 off; the setting kept in `config/prod.yaml` is 16.]**
+
+**P5: UDFs.** Haversine distance to Esbjerg over 10.7 M positions: built-in functions 0.8 s,
+pandas UDF 1.9 s (`ArrowEvalPython`, vectorised batches through Arrow), plain Python UDF 6.1 s
+(`BatchEvalPython`, one Python call per row). The pipeline uses only the built-in version
+(`silver/features.py`). UDFs exist only in `perf/` as baselines.
+
+**P6: RDD vs DataFrame.** Counting exact duplicates in the 18.7 M Bronze rows takes 203.0 s with
+`map` + `reduceByKey` and 27.8 s with `distinct()`. The RDD version shuffles less (1,269 vs
+2,519 MB), because `reduceByKey` combines on the map side. It is still 7.3× slower: every row
+becomes a pickled Python tuple, and the Python workers spilled 15,397 MB. Its first attempt
+had the JVM killed by the kernel. It finished with `spark.python.worker.memory=256m`. The
+pipeline counts duplicates with DataFrames. The RDD count runs only behind `--rdd-check`, as an
+independent cross-check of the same number (§5.6).
 
 ## 7. Gold: serve the outcome
 
