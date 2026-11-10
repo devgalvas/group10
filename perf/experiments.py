@@ -8,6 +8,10 @@ Usage (from the repo root, on the VM):
     unset SPARK_HOME; export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
     ~/ais-env-dev/bin/python -m perf.experiments --day 2026-09-01 P1 P2 P3 P5 P6
     ~/ais-env-dev/bin/python -m perf.experiments --day 2026-09-01 --runs 1 P4
+    # P4 one variant per process (a fresh JVM each time; several Silver builds in one
+    # process got the JVM OOM-killed on the 8 GB VM):
+    ~/ais-env-dev/bin/python -m perf.experiments --day 2026-09-01 --runs 1 --no-warmup \
+        --variants silver_sp16_coalesce_on P4
     ~/ais-env-dev/bin/python -m perf.report --env prod --out-root /data/ais/perf
 """
 
@@ -42,6 +46,8 @@ class Ctx:
     out: Settings  # perf lake: written
     day: date
     runs: int
+    variants: frozenset[str] = frozenset()  # empty = all
+    warmup: bool = True
 
     def load(self, layer: str, name: str) -> DataFrame:
         return self.spark.read.format("delta").load(str(table_path(self.src, layer, name)))
@@ -64,7 +70,11 @@ class Ctx:
         notes: str | None = None,
         runs: int | None = None,
     ) -> list[PerfResult]:
-        action()  # warm-up: JIT, file cache, Delta snapshot; not recorded
+        if self.variants and variant not in self.variants:
+            logger.info("%s %s: skipped (not in --variants)", exp, variant)
+            return []
+        if self.warmup:
+            action()  # warm-up: JIT, file cache, Delta snapshot; not recorded
         res = measure_repeated(
             self.spark, exp, variant, action, plan_df, runs=runs or self.runs, notes=notes
         )
@@ -323,6 +333,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--day", type=date.fromisoformat, required=True)
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--out-root", type=Path, default=Path("/data/ais/perf"))
+    parser.add_argument(
+        "--variants",
+        default="",
+        help="comma-separated variant names to run (default: all)",
+    )
+    parser.add_argument(
+        "--no-warmup",
+        action="store_true",
+        help="skip the unrecorded warm-up run (P4: each Silver build is already cold)",
+    )
     args = parser.parse_args(argv)
 
     src = load_settings(args.env)
@@ -335,7 +355,8 @@ def main(argv: list[str] | None = None) -> int:
     if out.lake_dir == src.lake_dir:
         raise SystemExit("--out-root must differ from the source data root")
     spark = build_spark(src)
-    ctx = Ctx(spark, src, out, args.day, args.runs)
+    variants = frozenset(v.strip() for v in args.variants.split(",") if v.strip())
+    ctx = Ctx(spark, src, out, args.day, args.runs, variants, warmup=not args.no_warmup)
     for name in args.experiments:
         logger.info("=== %s on %s ===", name, args.day)
         EXPERIMENTS[name](ctx)
