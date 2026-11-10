@@ -280,9 +280,46 @@ trigonometry; its gain is measured in P2.
 
 | | count | covers |
 |---|---:|---|
-| unit | 142 | every reject code (positive and negative case), priority, DataFrame = SQL, dedup tie-break, sentinels at their boundaries, haversine, zones, gates, CLI, perf harness |
-| integration | 33 | Bronze ingest and idempotency, row conservation recounted term by term, SCD2 with a planted name change, full Silver rerun gives identical rows, Gold reconciliation, stale gate, dashboard render |
-| **total** | **175** | run on every PR by `ci.yml` (about 2 min for the setup PR, about 10 min for the full suite) |
+| unit | 144 | every reject code (positive and negative case), priority, DataFrame = SQL, dedup tie-break, sentinels at their boundaries, haversine, zones, gates, CLI, perf harness |
+| integration | 36 | Bronze ingest, idempotency and schema evolution, row conservation recounted term by term, SCD2 with a planted name change, full Silver rerun gives identical rows, Gold reconciliation, stale gate, dashboard render |
+| **total** | **180** | run on every PR by `ci.yml` (about 2 min for the setup PR, about 10 min for the full suite) |
+
+### 5.8 Scalability: volume, late data, schema change
+
+**Volume.** One day is 18.7 M rows: 3.34 GB of CSV, 548 MB of Bronze Delta. Every stage works
+on one `_source_date`/`date` partition and writes it with `replaceWhere`, so a run touches one
+day plus the previous day's last fix per vessel (one aggregation, §5.5). The cost of a day does
+not grow with the size of the lake, and a backfill is a loop over days. The limit is memory per
+day, not the number of days: a full day needed the three changes of D-17 to fit in the 8 GB
+VM. At 10× the daily volume, the first things to revisit are the 32 MB read partitions, the
+`DISK_ONLY` persists and the 16 shuffle partitions (P4), on more than one node.
+
+**Late or corrected data.** The DMA publishes one file per day, so data arrives late as a
+corrected file for a past day:
+- A row whose timestamp is not on the file's day is rejected as `TS_OUTSIDE_FILE_DAY`, not
+  written to the wrong partition. There were 0 such rows on 2026-09-01.
+- `ops.ingestion_log` keeps the SHA-256 of each zip. The same file again is `skipped`; a
+  different file for the same day is re-ingested and replaces only that Bronze partition.
+- Re-running Silver for that day replaces its partition. Gold recomputes `port_calls` from
+  every gated date and rewrites `port_congestion_hourly` for the gated dates (D-15).
+- Two limits remain. The SCD2 merge skips versions that are not newer than the current one,
+  so a correction to an old day cannot insert an older vessel version. And the first fix of
+  the following day keeps the gap computed from the old data until that day is also re-run.
+
+**Schema change.** The raw header is checked against the versioned contract
+`contracts/ais_raw_v1.json` before any row is read. Columns are matched by sanitised name,
+with aliases (`# Timestamp` and `Timestamp`), so reordered columns still map correctly.
+
+| header change | behaviour | where it is recorded |
+|---|---|---|
+| a required column is missing (5 of 26) | `SchemaContractError`, the day fails, other days are untouched | `failed` row in `ops.ingestion_log` |
+| an optional column is missing | warning; the column reads as null for that day | `missing_optional` in the header report |
+| a new column appears | warning; Bronze adds it with `mergeSchema` (null on earlier days); Silver ignores it until a contract v2 maps it | `extra_columns` in `ops.ingestion_log` |
+
+The third row was a gap found while writing this section. The contract accepted the extra
+column, but the Bronze write had no `mergeSchema`, and Delta rejected the day with a schema
+mismatch. The fix is two lines, and two integration tests cover both optional cases
+(`test_extra_source_column_is_added_to_bronze`, `test_missing_optional_column_reads_as_null`).
 
 ## 6. Performance: measured, not assumed
 
@@ -307,7 +344,7 @@ saved physical plans are in `docs/performance.md` and `docs/perf/plans/`.
 | P2 | broadcasting small dimensions avoids a shuffle | broadcast 1.4 s vs sort-merge 2.3 s (190 MB shuffle) | confirmed, kept |
 | P2 | the bounding box skips most trigonometry | 1.2 s vs 1.4 s | small gain, kept |
 | P3 | the per-vessel window is skewed by a few chatty MMSIs | largest MMSI = 0.22 % of the day | rejected |
-| P4 | 200 shuffle partitions is too many for 4 cores | 200: 493 s · **[P4 running]** | **[P4]** |
+| P4 | 200 shuffle partitions is too many for 4 cores | all six variants 480–525 s; the same variant varied 16 % between runs | not supported; 16 kept |
 | P5 | a Python UDF is slower than built-ins | built-in 0.8 s · pandas UDF 1.9 s · Python UDF 6.1 s | confirmed |
 | P6 | the RDD path costs more than DataFrame | `distinct` 27.8 s vs `reduceByKey` 203.0 s | confirmed |
 
@@ -337,15 +374,38 @@ positions each (p99 12,184). The largest MMSI has 23,213 rows, 0.22 % of the day
 `ENSURE_REQUIREMENTS` in the base plan, which AQE may coalesce into fewer, larger partitions,
 and `REPARTITION_BY_NUM` with the explicit repartition, which it may not. With 193 MB to
 shuffle, coalescing probably leaves fewer tasks than the 4 cores. 32 and 64 partitions give
-the same 2.6–2.7 s. P4 tests the same effect on the full Silver build.
+the same 2.6–2.7 s. On the full Silver build (P4), the same effect shows as spill, not time.
 The last pair compares the window on valid rows before and after deduplication, both built
 from Bronze. Deduplicating first costs 383 s vs 312 s, but it is required for correctness: an
 exact duplicate gives a gap of 0 s, so `implied_speed_kn` is null and the `POSITION_JUMP`
 check cannot see that row. Deduplication stays before the window.
 
-**P4: shuffle partitions.** **[P4 running: one variant per process. All 8 variants in one
-process got the JVM OOM-killed on the third Silver build. Fill in: 200/64/16/8 with coalescing
-on, 200/16 off; the setting kept in `config/prod.yaml` is 16.]**
+**P4: shuffle partitions.** Each variant is one full Silver build of the day, run once in its
+own process (10 Nov 2026):
+
+| shuffle partitions | AQE coalescing | wall (s) | spill (MB) | max task (s) |
+|---:|---|---:|---:|---:|
+| 200 | on | 493 / 570 | 2,586 | 45.0 / 54.8 |
+| 64 | on | 525 | 1,914 | 50.1 |
+| 16 | on | 503 | 10,352 | 51.2 |
+| 8 | on | 503 | 25,627 | 47.9 |
+| 200 | off | 510 | 0 | 45.4 |
+| 16 | off | 480 | 5,670 | 45.5 |
+
+The hypothesis is not supported. Every variant takes 480–525 s. The one configuration measured
+twice (200, coalescing on: 493 s after a warm-up on 9 Nov, 570 s as the first build of the
+day on 10 Nov) varies more than the variants differ from each other. With one run per
+variant, no setting is measurably faster. The wall time is set by the longest tasks
+(45–55 s): parsing the raw strings and sorting for the deduplication. The number of
+partitions after the shuffle does not change those tasks.
+What the setting does change is **spill**. Fewer partitions are larger, and 8 partitions
+spill 25.6 GB to disk against 0 for 200 without coalescing. The spill costs little time here
+because the VM's local disk absorbs it. With coalescing on, 16 partitions spill almost twice
+as much as with it off (10.4 vs 5.7 GB). That matches the P3 reading: AQE merges the 16
+partitions into fewer, larger ones. `config/prod.yaml` keeps 16 partitions: it is the fastest
+of the six runs (16, off), and the production build of the same day took 459 s with it. This
+is a choice within the noise, not a measured gain. A firm answer would need 3+ runs per
+variant, about 35 minutes of VM time each (3.5 hours for the six).
 
 **P5: UDFs.** Haversine distance to Esbjerg over 10.7 M positions: built-in functions 0.8 s,
 pandas UDF 1.9 s (`ArrowEvalPython`, vectorised batches through Arrow), plain Python UDF 6.1 s
