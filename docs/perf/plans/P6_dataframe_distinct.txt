@@ -1,0 +1,42 @@
+== Physical Plan ==
+AdaptiveSparkPlan (6)
++- HashAggregate (5)
+   +- Exchange (4)
+      +- HashAggregate (3)
+         +- Project (2)
+            +- Scan parquet  (1)
+
+
+(1) Scan parquet 
+Output [27]: [timestamp#48, type_of_mobile#49, mmsi#50, latitude#51, longitude#52, navigational_status#53, rot#54, sog#55, cog#56, heading#57, imo#58, callsign#59, name#60, ship_type#61, cargo_type#62, width#63, length#64, type_of_position_fixing_device#65, draught#66, destination#67, eta#68, data_source_type#69, a#70, b#71, c#72, d#73, _source_date#77]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/bronze/ais_raw]
+PartitionFilters: [isnotnull(_source_date#77), (_source_date#77 = 2026-09-01)]
+ReadSchema: struct<timestamp:string,type_of_mobile:string,mmsi:string,latitude:string,longitude:string,navigational_status:string,rot:string,sog:string,cog:string,heading:string,imo:string,callsign:string,name:string,ship_type:string,cargo_type:string,width:string,length:string,type_of_position_fixing_device:string,draught:string,destination:string,eta:string,data_source_type:string,a:string,b:string,c:string,d:string>
+
+(2) Project
+Output [26]: [timestamp#48, type_of_mobile#49, mmsi#50, latitude#51, longitude#52, navigational_status#53, rot#54, sog#55, cog#56, heading#57, imo#58, callsign#59, name#60, ship_type#61, cargo_type#62, width#63, length#64, type_of_position_fixing_device#65, draught#66, destination#67, eta#68, data_source_type#69, a#70, b#71, c#72, d#73]
+Input [27]: [timestamp#48, type_of_mobile#49, mmsi#50, latitude#51, longitude#52, navigational_status#53, rot#54, sog#55, cog#56, heading#57, imo#58, callsign#59, name#60, ship_type#61, cargo_type#62, width#63, length#64, type_of_position_fixing_device#65, draught#66, destination#67, eta#68, data_source_type#69, a#70, b#71, c#72, d#73, _source_date#77]
+
+(3) HashAggregate
+Input [26]: [timestamp#48, type_of_mobile#49, mmsi#50, latitude#51, longitude#52, navigational_status#53, rot#54, sog#55, cog#56, heading#57, imo#58, callsign#59, name#60, ship_type#61, cargo_type#62, width#63, length#64, type_of_position_fixing_device#65, draught#66, destination#67, eta#68, data_source_type#69, a#70, b#71, c#72, d#73]
+Keys [26]: [cog#56, cargo_type#62, heading#57, name#60, type_of_mobile#49, callsign#59, timestamp#48, latitude#51, imo#58, navigational_status#53, rot#54, draught#66, a#70, longitude#52, b#71, mmsi#50, type_of_position_fixing_device#65, ship_type#61, eta#68, data_source_type#69, length#64, c#72, sog#55, width#63, destination#67, d#73]
+Functions: []
+Aggregate Attributes: []
+Results [26]: [cog#56, cargo_type#62, heading#57, name#60, type_of_mobile#49, callsign#59, timestamp#48, latitude#51, imo#58, navigational_status#53, rot#54, draught#66, a#70, longitude#52, b#71, mmsi#50, type_of_position_fixing_device#65, ship_type#61, eta#68, data_source_type#69, length#64, c#72, sog#55, width#63, destination#67, d#73]
+
+(4) Exchange
+Input [26]: [cog#56, cargo_type#62, heading#57, name#60, type_of_mobile#49, callsign#59, timestamp#48, latitude#51, imo#58, navigational_status#53, rot#54, draught#66, a#70, longitude#52, b#71, mmsi#50, type_of_position_fixing_device#65, ship_type#61, eta#68, data_source_type#69, length#64, c#72, sog#55, width#63, destination#67, d#73]
+Arguments: hashpartitioning(cog#56, cargo_type#62, heading#57, name#60, type_of_mobile#49, callsign#59, timestamp#48, latitude#51, imo#58, navigational_status#53, rot#54, draught#66, a#70, longitude#52, b#71, mmsi#50, type_of_position_fixing_device#65, ship_type#61, eta#68, data_source_type#69, length#64, c#72, sog#55, width#63, ... 3 more fields), ENSURE_REQUIREMENTS, [plan_id=1018]
+
+(5) HashAggregate
+Input [26]: [cog#56, cargo_type#62, heading#57, name#60, type_of_mobile#49, callsign#59, timestamp#48, latitude#51, imo#58, navigational_status#53, rot#54, draught#66, a#70, longitude#52, b#71, mmsi#50, type_of_position_fixing_device#65, ship_type#61, eta#68, data_source_type#69, length#64, c#72, sog#55, width#63, destination#67, d#73]
+Keys [26]: [cog#56, cargo_type#62, heading#57, name#60, type_of_mobile#49, callsign#59, timestamp#48, latitude#51, imo#58, navigational_status#53, rot#54, draught#66, a#70, longitude#52, b#71, mmsi#50, type_of_position_fixing_device#65, ship_type#61, eta#68, data_source_type#69, length#64, c#72, sog#55, width#63, destination#67, d#73]
+Functions: []
+Aggregate Attributes: []
+Results [26]: [timestamp#48, type_of_mobile#49, mmsi#50, latitude#51, longitude#52, navigational_status#53, rot#54, sog#55, cog#56, heading#57, imo#58, callsign#59, name#60, ship_type#61, cargo_type#62, width#63, length#64, type_of_position_fixing_device#65, draught#66, destination#67, eta#68, data_source_type#69, a#70, b#71, c#72, d#73]
+
+(6) AdaptiveSparkPlan
+Output [26]: [timestamp#48, type_of_mobile#49, mmsi#50, latitude#51, longitude#52, navigational_status#53, rot#54, sog#55, cog#56, heading#57, imo#58, callsign#59, name#60, ship_type#61, cargo_type#62, width#63, length#64, type_of_position_fixing_device#65, draught#66, destination#67, eta#68, data_source_type#69, a#70, b#71, c#72, d#73]
+Arguments: isFinalPlan=false
+

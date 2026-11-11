@@ -1,0 +1,28 @@
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+build/
+dist/
+
+# Spark
+spark-warehouse/
+metastore_db/
+derby.log
+.ipynb_checkpoints/
+
+# Data (never commit)
+*.zip
+/data/
+*.parquet
+_delta_log/
+
+# Local CI lake
+.ais-ci/
+
+# Test reports
+pytest-report.xml

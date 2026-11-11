@@ -1,0 +1,77 @@
+"""Delta Lake write helpers. Pipeline outputs are only written idempotently."""
+
+from __future__ import annotations
+
+import logging
+from datetime import date
+from pathlib import Path
+
+from pyspark.sql import DataFrame, SparkSession
+
+logger = logging.getLogger(__name__)
+
+
+def table_exists(spark: SparkSession, path: Path | str) -> bool:
+    """True if path holds a Delta table."""
+    from delta.tables import DeltaTable
+
+    return DeltaTable.isDeltaTable(spark, str(path))
+
+
+def write_partition(
+    df: DataFrame,
+    path: Path | str,
+    partition_col: str,
+    value: date | str,
+    merge_schema: bool = False,
+) -> None:
+    """Overwrite exactly one partition (partition_col = value) of a Delta table.
+
+    `replaceWhere` makes the write idempotent: rerunning a day replaces that day's rows and
+    leaves every other partition untouched. Delta rejects the write if any row of df falls
+    outside the partition, which guards against writing the wrong day.
+
+    With merge_schema, columns of df that the table lacks are added to it (null in the other
+    partitions). Only Bronze uses it: a new source column must not stop the daily run.
+    """
+    predicate = f"{partition_col} = '{value}'"
+    writer = (
+        df.write.format("delta")
+        .mode("overwrite")
+        .option("replaceWhere", predicate)
+        .partitionBy(partition_col)
+    )
+    if merge_schema:
+        writer = writer.option("mergeSchema", "true")
+    writer.save(str(path))
+    logger.info("wrote %s partition %s", path, predicate)
+
+
+def append(df: DataFrame, path: Path | str) -> None:
+    """Append rows to a Delta table, creating it on first use. Only for ops log tables."""
+    df.write.format("delta").mode("append").save(str(path))
+    logger.info("appended to %s", path)
+
+
+def write_partitions(
+    df: DataFrame, path: Path | str, partition_col: str, values: list[date]
+) -> None:
+    """Overwrite exactly the listed partitions (partition_col IN values) of a Delta table."""
+    if not values:
+        raise ValueError("write_partitions needs at least one partition value")
+    in_list = ", ".join(f"'{v}'" for v in sorted(values))
+    predicate = f"{partition_col} IN ({in_list})"
+    (
+        df.write.format("delta")
+        .mode("overwrite")
+        .option("replaceWhere", predicate)
+        .partitionBy(partition_col)
+        .save(str(path))
+    )
+    logger.info("wrote %s partitions %s", path, predicate)
+
+
+def overwrite(df: DataFrame, path: Path | str) -> None:
+    """Replace a whole (small, fully recomputed) Delta table in one commit."""
+    df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(str(path))
+    logger.info("overwrote %s", path)

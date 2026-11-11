@@ -1,0 +1,51 @@
+== Physical Plan ==
+AdaptiveSparkPlan (9)
++- Project (8)
+   +- Project (7)
+      +- Project (6)
+         +- Window (5)
+            +- Sort (4)
+               +- Exchange (3)
+                  +- Project (2)
+                     +- Scan parquet  (1)
+
+
+(1) Scan parquet 
+Output [6]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67, date#50]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/silver/vessel_position]
+PartitionFilters: [isnotnull(date#50), (date#50 = 2026-09-01)]
+ReadSchema: struct<mmsi:bigint,ts_utc:timestamp,lat:double,lon:double,flags:array<string>>
+
+(2) Project
+Output [5]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67]
+Input [6]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67, date#50]
+
+(3) Exchange
+Input [5]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67]
+Arguments: hashpartitioning(mmsi#48L, 16), REPARTITION_BY_NUM, [plan_id=1895]
+
+(4) Sort
+Input [5]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67]
+Arguments: [mmsi#48L ASC NULLS FIRST, ts_utc#49 ASC NULLS FIRST], false, 0
+
+(5) Window
+Input [5]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67]
+Arguments: [lag(ts_utc#49, -1, null) windowspecdefinition(mmsi#48L, ts_utc#49 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we0#3962, lag(lat#53, -1, null) windowspecdefinition(mmsi#48L, ts_utc#49 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we0#3971, lag(lat#53, -1, null) windowspecdefinition(mmsi#48L, ts_utc#49 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we1#3972, lag(lon#54, -1, null) windowspecdefinition(mmsi#48L, ts_utc#49 ASC NULLS FIRST, specifiedwindowframe(RowFrame, -1, -1)) AS _we2#3973], [mmsi#48L], [ts_utc#49 ASC NULLS FIRST]
+
+(6) Project
+Output [7]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67, (cast(ts_utc#49 as bigint) - cast(_we0#3962 as bigint)) AS gap_s#3961L, (12742.0176 * ASIN(SQRT((POWER(SIN(((RADIANS(lat#53) - RADIANS(_we0#3971)) / 2.0)), 2.0) + ((COS(RADIANS(_we1#3972)) * COS(RADIANS(lat#53))) * POWER(SIN(((RADIANS(lon#54) - RADIANS(_we2#3973)) / 2.0)), 2.0)))))) AS step_km#3970]
+Input [9]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67, _we0#3962, _we0#3971, _we1#3972, _we2#3973]
+
+(7) Project
+Output [8]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67, gap_s#3961L, step_km#3970, CASE WHEN (gap_s#3961L > 0) THEN ((step_km#3970 / cast(gap_s#3961L as double)) * 1943.8444924406047) END AS implied_speed_kn#3982]
+Input [7]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67, gap_s#3961L, step_km#3970]
+
+(8) Project
+Output [8]: [mmsi#48L, ts_utc#49, lat#53, lon#54, CASE WHEN coalesce((implied_speed_kn#3982 > 50.0), false) THEN array_union(flags#67, [POSITION_JUMP]) ELSE flags#67 END AS flags#4000, gap_s#3961L, step_km#3970, implied_speed_kn#3982]
+Input [8]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#67, gap_s#3961L, step_km#3970, implied_speed_kn#3982]
+
+(9) AdaptiveSparkPlan
+Output [8]: [mmsi#48L, ts_utc#49, lat#53, lon#54, flags#4000, gap_s#3961L, step_km#3970, implied_speed_kn#3982]
+Arguments: isFinalPlan=false
+

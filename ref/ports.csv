@@ -1,0 +1,4 @@
+port_id,name,lat,lon,port_radius_km,anchorage_radius_km
+DKEBJ,Esbjerg,55.466,8.430,2.5,12
+DKAAR,Aarhus,56.150,10.230,2.5,10
+DKCPH,Copenhagen,55.705,12.605,3.0,10

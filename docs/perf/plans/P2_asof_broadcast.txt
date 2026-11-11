@@ -1,0 +1,56 @@
+== Physical Plan ==
+AdaptiveSparkPlan (9)
++- Project (8)
+   +- BroadcastHashJoin LeftOuter BuildRight (7)
+      :- Project (2)
+      :  +- Scan parquet  (1)
+      +- BroadcastExchange (6)
+         +- Project (5)
+            +- Filter (4)
+               +- Scan parquet  (3)
+
+
+(1) Scan parquet 
+Output [5]: [mmsi#48L, ts_utc#49, lat#53, lon#54, date#50]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/silver/vessel_position]
+PartitionFilters: [isnotnull(date#50), (date#50 = 2026-09-01)]
+ReadSchema: struct<mmsi:bigint,ts_utc:timestamp,lat:double,lon:double>
+
+(2) Project
+Output [4]: [mmsi#48L, ts_utc#49, lat#53, lon#54]
+Input [5]: [mmsi#48L, ts_utc#49, lat#53, lon#54, date#50]
+
+(3) Scan parquet 
+Output [5]: [vessel_sk#131L, mmsi#132L, ship_type_group#137, valid_from#141, valid_to#142]
+Batched: true
+Location: PreparedDeltaFileIndex [file:/data/ais/prod/lake/silver/dim_vessel]
+PushedFilters: [IsNotNull(mmsi), IsNotNull(valid_from), IsNotNull(valid_to)]
+ReadSchema: struct<vessel_sk:bigint,mmsi:bigint,ship_type_group:string,valid_from:timestamp,valid_to:timestamp>
+
+(4) Filter
+Input [5]: [vessel_sk#131L, mmsi#132L, ship_type_group#137, valid_from#141, valid_to#142]
+Condition : ((isnotnull(mmsi#132L) AND isnotnull(valid_from#141)) AND isnotnull(valid_to#142))
+
+(5) Project
+Output [5]: [vessel_sk#131L, mmsi#132L AS _d_mmsi#157L, valid_from#141 AS _d_from#158, valid_to#142 AS _d_to#159, ship_type_group#137 AS _d_group#160]
+Input [5]: [vessel_sk#131L, mmsi#132L, ship_type_group#137, valid_from#141, valid_to#142]
+
+(6) BroadcastExchange
+Input [5]: [vessel_sk#131L, _d_mmsi#157L, _d_from#158, _d_to#159, _d_group#160]
+Arguments: HashedRelationBroadcastMode(List(input[1, bigint, true]),false), [plan_id=548]
+
+(7) BroadcastHashJoin
+Left keys [1]: [mmsi#48L]
+Right keys [1]: [_d_mmsi#157L]
+Join type: LeftOuter
+Join condition: ((ts_utc#49 >= _d_from#158) AND (ts_utc#49 < _d_to#159))
+
+(8) Project
+Output [6]: [mmsi#48L, ts_utc#49, lat#53, lon#54, vessel_sk#131L, coalesce(_d_group#160, unknown) AS ship_type_group#185]
+Input [9]: [mmsi#48L, ts_utc#49, lat#53, lon#54, vessel_sk#131L, _d_mmsi#157L, _d_from#158, _d_to#159, _d_group#160]
+
+(9) AdaptiveSparkPlan
+Output [6]: [mmsi#48L, ts_utc#49, lat#53, lon#54, vessel_sk#131L, ship_type_group#185]
+Arguments: isFinalPlan=false
+

@@ -1,45 +1,51 @@
 name: DAT535 — Dev Pipeline
 
+# Every push to dev runs the pipeline end to end on the one-day sample, in the isolated dev
+# data root (/data/ais/dev). Pull requests are covered by ci.yml on GitHub-hosted runners.
 on:
   push:
     branches: [dev]
-  pull_request:
-    branches: [dev]
   workflow_dispatch:
+
+concurrency:
+  group: vm-pipeline
+  cancel-in-progress: false
 
 jobs:
   run-dev:
     name: Run Dev Pipeline
     runs-on: self-hosted
     environment: dev
+    timeout-minutes: 60
     env:
-      DAT535_ENV: dev
-      SPARK_HOME: /opt/spark
-      JAVA_HOME: /usr/lib/jvm/java-8-openjdk-amd64
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      SAMPLE_DATE: "2026-09-01"
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Resolve output directory
-        id: output-dir
-        # Persistent, non-tmp path: survives runner reboots/tmpfiles cleanup, unlike /tmp
-        run: echo "dir=$HOME/spark-lab-data/dev" >> "$GITHUB_OUTPUT"
+      - name: Install the package into the dev venv
+        run: ~/ais-env-dev/bin/pip install --quiet .
 
-      - name: Run Lab 2 & Lab 3 Pipelines
-        env:
-          DAT535_OUTPUT_DIR: ${{ steps.output-dir.outputs.dir }}
+      - name: Run bronze, silver and gold on the sample
         run: |
-          source ~/spark-env/bin/activate
-          mkdir -p "$DAT535_OUTPUT_DIR"
-          
-          echo "=== Running Dev Pipeline ==="
-          python $GITHUB_WORKSPACE/run_pipeline.py all
+          unset SPARK_HOME
+          ~/ais-env-dev/bin/ais-pipeline --env dev run \
+            --start "$SAMPLE_DATE" --end "$SAMPLE_DATE" --stages bronze,silver,gold
 
-      - name: Upload Dev artifacts
+      - name: Data quality report
+        if: always()
+        run: |
+          unset SPARK_HOME
+          # grep drops Spark's ":: loading settings ::" line, which Actions would parse as a command.
+          ~/ais-env-dev/bin/ais-pipeline --env dev dq-report --date "$SAMPLE_DATE" \
+            | grep -v '^::' | tee dq-report.md
+          cat dq-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the report
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: dev-outputs-${{ github.run_number }}
-          path: ${{ steps.output-dir.outputs.dir }}/
-          retention-days: 7
-          if-no-files-found: ignore
+          name: dq-report-dev
+          path: dq-report.md

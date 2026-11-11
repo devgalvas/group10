@@ -1,0 +1,26 @@
+ship_type,ship_type_group
+Cargo,cargo
+Tanker,tanker
+Passenger,passenger
+HSC,passenger
+Fishing,fishing
+Tug,service
+Towing,service
+Towing long/wide,service
+Pilot,service
+SAR,service
+Dredging,service
+Diving,service
+Law enforcement,service
+Port tender,service
+Anti-pollution,service
+Medical,service
+Pleasure,pleasure
+Sailing,pleasure
+Military,other
+WIG,other
+Not party to conflict,other
+Spare 1,other
+Spare 2,other
+Reserved,other
+Other,other

@@ -1,61 +1,64 @@
 name: DAT535 — Production Pipeline
 
+# A merge into main deploys a release, after a reviewer approves the `main` environment.
+# The scheduled workflow then runs the deployed release, not a checkout.
 on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      lab:
-        description: Lab to run
-        required: true
-        default: all
-        type: choice
-        options: [all, lab2, lab3]
+
+concurrency:
+  group: vm-pipeline
+  cancel-in-progress: false
 
 jobs:
   deploy-prod:
     name: Deploy to Production
     runs-on: self-hosted
     environment: main
+    timeout-minutes: 20
     env:
-      DAT535_ENV: prod
-      SPARK_HOME: /opt/spark
-      JAVA_HOME: /usr/lib/jvm/java-8-openjdk-amd64
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      RELEASES: /opt/ais-pipeline/releases
+      CURRENT: /opt/ais-pipeline/current
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Resolve output directory
-        id: output-dir
-        # Persistent, non-tmp path: survives runner reboots/tmpfiles cleanup, unlike /tmp
-        run: echo "dir=$HOME/spark-lab-data/prod" >> "$GITHUB_OUTPUT"
-
-      - name: Run Production Pipeline
-        env:
-          DAT535_OUTPUT_DIR: ${{ steps.output-dir.outputs.dir }}
+      - name: Copy the release
         run: |
-          source ~/spark-env/bin/activate
-          mkdir -p "$DAT535_OUTPUT_DIR"
-          
-          LAB_TO_RUN="${{ github.event.inputs.lab || 'all' }}"
-          echo "=== Running Production Pipeline ($LAB_TO_RUN) ==="
-          python $GITHUB_WORKSPACE/run_pipeline.py $LAB_TO_RUN
+          test -w "$RELEASES" || { echo "::error::$RELEASES is not writable (see docs/runbook.md)"; exit 1; }
+          dest="$RELEASES/$GITHUB_SHA"
+          rm -rf "$dest" && mkdir -p "$dest"
+          cp -a config ref src pyproject.toml README.md "$dest"/
+          [ -d dashboard ] && cp -a dashboard "$dest"/ || true
 
-      - name: Upload Production artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: prod-outputs-${{ github.run_number }}
-          path: ${{ steps.output-dir.outputs.dir }}/
-          retention-days: 30
-          if-no-files-found: ignore
+      - name: Install the release into the prod venv
+        run: ~/ais-env-prod/bin/pip install --quiet "$RELEASES/$GITHUB_SHA[dashboard]"
 
-      - name: Write pipeline summary
+      - name: Switch the current symlink
         run: |
-          echo "## Production Pipeline Run" >> $GITHUB_STEP_SUMMARY
-          echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Run # | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Lab | ${{ github.event.inputs.lab || 'all' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          # ln + mv -T replaces the link in one rename, so readers never see it missing.
+          ln -sfn "$RELEASES/$GITHUB_SHA" "$CURRENT.tmp"
+          mv -Tf "$CURRENT.tmp" "$CURRENT"
+
+      - name: Smoke check from the release
+        run: |
+          unset SPARK_HOME
+          cd "$CURRENT"
+          ~/ais-env-prod/bin/ais-pipeline --env prod check
+
+      - name: Keep the last 3 releases
+        run: |
+          ls -1dt "$RELEASES"/*/ | tail -n +4 | xargs -r rm -rf
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed release"
+            echo
+            echo "| sha | version | deployed at (UTC) |"
+            echo "|---|---|---|"
+            echo "| \`${GITHUB_SHA::12}\` | $(~/ais-env-prod/bin/ais-pipeline --version) | $(date -u '+%F %T') |"
+          } >> "$GITHUB_STEP_SUMMARY"

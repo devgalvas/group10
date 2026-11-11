@@ -1,0 +1,42 @@
+name: VM smoke
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: vm-pipeline
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Project env on the VM
+    runs-on: self-hosted
+    environment: dev
+    env:
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the package into the dev venv
+        run: ~/ais-env-dev/bin/pip install --quiet .
+
+      - name: Pipeline check
+        run: |
+          unset SPARK_HOME
+          ~/ais-env-dev/bin/ais-pipeline --env dev check
+
+      - name: Versions
+        run: |
+          unset SPARK_HOME
+          {
+            echo "### VM smoke"
+            echo
+            echo '```'
+            "$JAVA_HOME/bin/java" -version 2>&1 | head -1
+            ~/ais-env-dev/bin/python --version
+            ~/ais-env-dev/bin/python -c "import pyspark; print('pyspark', pyspark.__version__)"
+            ~/ais-env-dev/bin/pip show delta-spark | grep -i '^version' | sed 's/^/delta-spark /'
+            df -h /data | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

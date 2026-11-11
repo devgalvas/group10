@@ -1,0 +1,174 @@
+{
+  "name": "ais_raw",
+  "version": "v1",
+  "source": "Danish Maritime Authority daily AIS file (aisdk-YYYY-MM-DD.csv inside a zip)",
+  "delimiter": ",",
+  "timestamp_format": "dd/MM/yyyy HH:mm:ss",
+  "null_placeholders": [
+    "",
+    "Unknown",
+    "Unknown value",
+    "Undefined",
+    "N/A"
+  ],
+  "columns": [
+    {
+      "source_name": "Timestamp",
+      "bronze_name": "timestamp",
+      "required": true,
+      "aliases": [
+        "# Timestamp"
+      ]
+    },
+    {
+      "source_name": "Type of mobile",
+      "bronze_name": "type_of_mobile",
+      "required": true,
+      "aliases": []
+    },
+    {
+      "source_name": "MMSI",
+      "bronze_name": "mmsi",
+      "required": true,
+      "aliases": []
+    },
+    {
+      "source_name": "Latitude",
+      "bronze_name": "latitude",
+      "required": true,
+      "aliases": []
+    },
+    {
+      "source_name": "Longitude",
+      "bronze_name": "longitude",
+      "required": true,
+      "aliases": []
+    },
+    {
+      "source_name": "Navigational status",
+      "bronze_name": "navigational_status",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "ROT",
+      "bronze_name": "rot",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "SOG",
+      "bronze_name": "sog",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "COG",
+      "bronze_name": "cog",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Heading",
+      "bronze_name": "heading",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "IMO",
+      "bronze_name": "imo",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Callsign",
+      "bronze_name": "callsign",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Name",
+      "bronze_name": "name",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Ship type",
+      "bronze_name": "ship_type",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Cargo type",
+      "bronze_name": "cargo_type",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Width",
+      "bronze_name": "width",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Length",
+      "bronze_name": "length",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Type of position fixing device",
+      "bronze_name": "type_of_position_fixing_device",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Draught",
+      "bronze_name": "draught",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Destination",
+      "bronze_name": "destination",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "ETA",
+      "bronze_name": "eta",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "Data source type",
+      "bronze_name": "data_source_type",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "A",
+      "bronze_name": "a",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "B",
+      "bronze_name": "b",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "C",
+      "bronze_name": "c",
+      "required": false,
+      "aliases": []
+    },
+    {
+      "source_name": "D",
+      "bronze_name": "d",
+      "required": false,
+      "aliases": []
+    }
+  ]
+}

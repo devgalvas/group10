@@ -1,0 +1,16 @@
+== Physical Plan ==
+* Filter (2)
++- Scan csv  (1)
+
+
+(1) Scan csv 
+Output [27]: [timestamp#0, type_of_mobile#1, mmsi#2, latitude#3, longitude#4, navigational_status#5, rot#6, sog#7, cog#8, heading#9, imo#10, callsign#11, name#12, ship_type#13, cargo_type#14, width#15, length#16, type_of_position_fixing_device#17, draught#18, destination#19, eta#20, data_source_type#21, a#22, b#23, c#24, d#25, _corrupt_record#26]
+Batched: false
+Location: InMemoryFileIndex [file:/data/ais/perf/landing/_extract_p1/aisdk-2026-09-01.csv]
+PushedFilters: [IsNotNull(navigational_status), EqualTo(navigational_status,Moored)]
+ReadSchema: struct<timestamp:string,type_of_mobile:string,mmsi:string,latitude:string,longitude:string,navigational_status:string,rot:string,sog:string,cog:string,heading:string,imo:string,callsign:string,name:string,ship_type:string,cargo_type:string,width:string,length:string,type_of_position_fixing_device:string,draught:string,destination:string,eta:string,data_source_type:string,a:string,b:string,c:string,d:string,_corrupt_record:string>
+
+(2) Filter [codegen id : 1]
+Input [27]: [timestamp#0, type_of_mobile#1, mmsi#2, latitude#3, longitude#4, navigational_status#5, rot#6, sog#7, cog#8, heading#9, imo#10, callsign#11, name#12, ship_type#13, cargo_type#14, width#15, length#16, type_of_position_fixing_device#17, draught#18, destination#19, eta#20, data_source_type#21, a#22, b#23, c#24, d#25, _corrupt_record#26]
+Condition : (isnotnull(navigational_status#5) AND (navigational_status#5 = Moored))
+
