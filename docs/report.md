@@ -485,13 +485,15 @@ screenshot.]**
 
 | workflow | trigger | runner | does |
 |---|---|---|---|
-| `ci.yml` | every PR to `dev`/`main` | GitHub-hosted | ruff + 175 tests, junit summary on the run page (D-05) |
+| `ci.yml` | every PR to `dev`/`main` | GitHub-hosted | ruff + 181 tests, junit summary on the run page (D-05) |
 | `dat535-dev.yml` | push to `dev` | VM | bronze → silver → gold on the dev sample, dq-report in the step summary |
 | `dat535-prod.yml` | push to `main`, **approval required** | VM | installs the commit to `/opt/ais-pipeline/releases/<sha>`, switches the `current` symlink, runs `check`, keeps 3 releases |
 | `scheduled.yml` | cron every 6 h, or dispatch with a date range | VM | `run --next-day` (or a backfill) from the deployed release |
 
 The three VM workflows share `concurrency: vm-pipeline`, so two runs never write the same
-Delta table at once.
+Delta table at once. A prod deploy waits for a manual approval on the `main` environment;
+with one active team member, self-review is allowed (D-18). The backfill was dispatched as
+one run per day for the memory reason in D-17 (D-18).
 
 **Observability:**
 - `ops.pipeline_runs`: one row per stage, with status, row counts and the git SHA;
@@ -560,5 +562,6 @@ summary, the backfill row counts.]**
 | D-15 | Gold publishes only gated dates |
 | D-16 | experiments never write to the prod lake |
 | D-17 | Silver fits a full day in 8 GB by staying out of the heap |
+| D-18 | one-person prod approval and a backfill of one day per run |
 
 Full entries: `docs/decisions.md`.

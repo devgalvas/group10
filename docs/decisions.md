@@ -190,3 +190,25 @@ context → options → decision → consequence.
   On a node with more RAM, `MEMORY_AND_DISK` and the default partition size would be the first
   things to try again.
 
+
+## D-18 One-person prod approval and a backfill of one day per run
+- Date: 2026-11-11 · Author: Lucas · Issues: AIS-10, AIS-40
+- Context: the `main` environment required a reviewer with **prevent self-review** on, and
+  listed both team members. After Victor left, the only active reviewer was the person who
+  merged, so the first prod deploy (run 43033332245) could not be approved. Separately,
+  `run --start A --end B` builds every day in one Spark session, and D-17 showed that a third
+  full Silver build in one process is killed on the 8 GB VM.
+- Decision: prevent self-review is off; a required reviewer stays, so every prod deploy still
+  waits for a manual approval on the run page. The backfill 2026-09-02 … 09-08 is dispatched
+  as one `scheduled.yml` run per day, in date order, each started after the previous one
+  succeeded. Every day gets its own process and its own run page.
+- Incident: the first try of 2026-09-02 (run 43036312793) was killed by the kernel OOM killer
+  while writing `silver.vessel_position`: the Spark JVM had 5.9 GB resident on a 7.9 GB VM with
+  no swap. Bronze, the Silver core and the `dim_vessel` merge (745 versions closed) had already
+  committed. About 1.1 GB was held by a forgotten Jupyter kernel and its own Spark JVM from the
+  course setup, and the OOM kill also stopped the runner service. Fix: those processes were
+  stopped, a 4 GB swap file on `/data` was added (`vm.swappiness=10`) as a safety margin, the
+  dashboard was stopped during the backfill, and the day was rerun (run 43039001618). The rerun
+  is safe: `plan_changes` ignores staged versions not later than the current one.
+- Trade-off: the approval is a deliberate pause, not a second pair of eyes. With two people it
+  should be turned back on. A range dispatch stays available for short ranges or a larger VM.
