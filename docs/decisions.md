@@ -212,3 +212,19 @@ context → options → decision → consequence.
   is safe: `plan_changes` ignores staged versions not later than the current one.
 - Trade-off: the approval is a deliberate pause, not a second pair of eyes. With two people it
   should be turned back on. A range dispatch stays available for short ranges or a larger VM.
+
+## D-19 Narrow by layer, never delete; voyage fields stay in Bronze for now
+- Date: 2026-11-16 · Author: Lucas · Issue: AIS-44 (report)
+- Context: review feedback asked for every removal to be justified, because dropped data may
+  be valuable. The rules were each justified in their own decision (D-09, D-10, D-12, D-14,
+  D-15), but the principle behind them, and the data Silver does not carry, were never stated
+  in one place.
+- Decision: each layer is narrower than the one before it, and nothing is deleted. Bronze keeps
+  every message verbatim. Silver keeps what the port questions need, and every row it removes
+  is either in `silver.rejects` with a reason code or counted in `ops.dq_metrics`. Gold
+  applies business thresholds only as config values. The voyage fields (`destination`, `eta`,
+  `draught`, `cargo_type`) are deliberately not in `vessel_position`: they describe a voyage,
+  not a fix, and no current Gold measure uses them.
+- Consequence: the voyage fields are recoverable only from Bronze. The planned fix is a
+  `silver.dim_voyage` versioned like `dim_vessel`. Losing `(mmsi, ts_utc)` conflict rows are
+  also only in Bronze. Both are listed as limitations in the report (§9).

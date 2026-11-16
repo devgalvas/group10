@@ -30,6 +30,21 @@ by GitHub Actions on a single OpenStack VM.
 
 **Out of scope:** streaming, ports outside the three, berth-level detail, ETA prediction.
 
+**Guiding principle: narrow by layer, never delete.** Each layer is narrower than the one
+before it, because each serves a narrower question. Narrowing is not deletion:
+- **Bronze** keeps every message of every file, verbatim, so any later rule can be undone or
+  changed by rebuilding Silver from it.
+- **Silver** keeps what the port questions need. Every row it does not keep is either stored
+  verbatim in `silver.rejects` with a reason code, or counted in `ops.dq_metrics` as an exact
+  copy or a resolved conflict. Row conservation is checked on every run (§5.5).
+- **Gold** keeps only what the dashboard reads.
+
+Every rule that removes or changes data was chosen because keeping the data would make a Gold
+number wrong, not to save space. §5.4 lists each removal: why it is made, what value the
+removed data could still have, and where that data is kept. Some data that could be useful
+is not used yet. The largest gap is the voyage fields (destination, ETA, draught), which
+Bronze keeps but Silver does not use (§5.4, D-19).
+
 ## 2. Dataset and data understanding
 
 | | |
@@ -106,12 +121,16 @@ is unit-tested on a hand-built DataFrame. I/O lives in `build.py` and `delta_io.
 
 ## 4. Bronze: preserve and trace
 
-| Decision | Evidence | Result |
+Bronze has one job: keep the source exactly as received, so that no Silver decision is ever
+final. If a cleaning rule turns out to be wrong, Silver is rebuilt from Bronze and nothing
+has to be downloaded again. The DMA archive could also change or disappear.
+
+| Decision | Why | Evidence and result |
 |---|---|---|
-| Every column as `StringType`, explicit schema from a versioned contract (D-06) | header checked against `contracts/ais_raw_v1.json` before reading | nothing is coerced or lost at ingestion; 18,658,332 Bronze rows = CSV data lines, 0 malformed |
-| Delta, partitioned by `_source_date` (D-02) | 548 MB of Delta vs 3.34 GB of CSV for 2026-09-01 | 6× less to scan for every later stage |
-| Lineage on every row | `_source_file`, `_file_sha256`, `_source_date`, `_ingest_ts`, `_run_id` | any Silver or reject row traces back to its file and run |
-| Idempotent ingest | `ops.ingestion_log` keeps the sha256 of each ingested zip; the same file again is `skipped`, a new file or `--force` rewrites the date with `replaceWhere` | reruns never duplicate a day |
+| Every column as `StringType`, explicit schema from a versioned contract (D-06) | A typed schema would turn `Unknown value` in a numeric column into a silent null or a failed day. The choice would be made at ingestion, where nobody counts it. With strings, every parse happens in Silver, where it is tested and measured. | header checked against `contracts/ais_raw_v1.json` before reading; 18,658,332 Bronze rows = CSV data lines, 0 malformed |
+| Delta, partitioned by `_source_date` (D-02) | Reruns must replace one day atomically, and `dim_vessel` needs `MERGE`. Plain Parquet offers neither. | 548 MB of Delta vs 3.34 GB of CSV for 2026-09-01: 6× less to scan for every later stage |
+| Lineage on every row | A reject or a suspicious Silver value must be traceable to its file and run. Otherwise a quality problem cannot be explained, only observed. | `_source_file`, `_file_sha256`, `_source_date`, `_ingest_ts`, `_run_id`; any Silver or reject row traces back to its source |
+| Idempotent ingest | The scheduler retries, and the DMA can republish a day. Neither may double a day's rows. | `ops.ingestion_log` keeps the sha256 of each zip. The same file again is `skipped`; a new file or `--force` rewrites the date with `replaceWhere` |
 
 ## 5. Silver: the trusted layer
 
@@ -124,6 +143,12 @@ other tables complete the model:
 - `silver.rejects`: every rejected Bronze row, kept verbatim with its reason.
 
 The ER diagram is in `docs/silver_model.md`.
+
+**Why this grain.** Every Gold question asks where a vessel was at a given moment: is it in
+port this hour, and when did it arrive and leave? So the unit is one vessel at one instant.
+Static attributes (name, type, dimensions) change rarely, so they go to `dim_vessel` instead
+of being repeated on every position. Voyage fields (destination, ETA, draught) describe a
+voyage, not a fix, and are not in this model yet (§5.4, D-19).
 
 **Processing order for one day:**
 1. Bronze partition.
@@ -138,9 +163,19 @@ The ER diagram is in `docs/silver_model.md`.
 10. As-of join to `dim_vessel`.
 11. Write `vessel_position` with `replaceWhere date = D`.
 
+The order matters:
+- **Rules before dedup.** A rejected row is stored as received, together with all its copies.
+  This keeps the reject counts true to the source.
+- **Dedup before features.** An exact copy gives a gap of 0 s. That hides `POSITION_JUMP`
+  (measured in P3).
+- **Sentinels before `dim_vessel` and features.** A speed of 102.3 kn must not reach any
+  average.
+
 ### 5.2 Standardisation
 
-- **Placeholders → null** (`Unknown`, `Unknown value`, `Undefined`, `N/A`, empty).
+- **Placeholders → null** (`Unknown`, `Unknown value`, `Undefined`, `N/A`, empty). All of
+  them mean "not reported". Keeping five spellings of "missing" would make every filter and
+  count in Silver handle each one. The original spelling stays in Bronze.
 - **Guarded casts:** a value that does not parse becomes null instead of failing the job.
 - **Timestamps:** parsed as `dd/MM/yyyy HH:mm:ss` in UTC, with `timeParserPolicy=CORRECTED`,
   so a malformed timestamp becomes null and is counted, instead of failing the day (D-08).
@@ -151,12 +186,19 @@ The ER diagram is in `docs/silver_model.md`.
 The verbatim 26 Bronze columns travel with each row as a `_raw` struct, together with a
 null-safe SHA-256 `_row_hash` (D-10). Without them, "exact duplicate" would compare cleaned
 values, and `Unknown` and an empty field would look the same. Rejects would also no longer be
-stored as received.
+stored as received. After the rejects are written, the struct is narrowed to the three
+fields that sentinel handling still needs (D-17, for memory). The hash is computed before
+that, so it still covers all 26 columns.
 
 ### 5.3 Cleaning: reject, deduplicate, flag
 
 Each problem gets one of three treatments: **reject** (the row cannot be used), **resolve**
 (keep one of several versions), or **flag and null** (the row is usable, but one field is not).
+The default is the mildest treatment that keeps Gold correct. A row is rejected only if no
+field of it can be used for a port question, because of what the row is (not a vessel) or
+because it cannot be placed in space, time or identity. A row with one bad field keeps its
+place, and the field is flagged. A suspicious row (a GPS jump) is flagged, not removed: the
+decision about it is left to the consumer.
 
 **Reject rules** apply in priority order; a row gets the first code that matches (D-09). The
 same rules exist twice:
@@ -187,7 +229,32 @@ END
 (`SOG_SENTINEL`, …) and then set to null. A sentinel averaged as a real speed would corrupt
 every Gold measure.
 
-### 5.4 Quality evidence: before and after
+### 5.4 What Silver removes, why, and where it is still kept
+
+The table lists every step that removes rows, values or columns. The counts are for the full
+day 2026-09-01. The "could still be worth" column answers the question every removal raises:
+what does the project lose if the rule is wrong?
+
+| step | removed (2026-09-01) | why it is removed | could still be worth | where it is kept |
+|---|---|---|---|---|
+| `OUT_OF_SCOPE_MOBILE` | 1,510,373 rows: base stations, AtoN, SAR aircraft | They are not vessels. A base station on a quay is "in port" 24 hours a day, so it would add a permanent vessel to every hourly count. | Receiver coverage (which stations hear which areas), positions of navigation aids, SAR flights | `silver.rejects`, verbatim, and Bronze |
+| `BAD_MMSI` | 135,890 rows from 25 transmitters | The MMSI is the vessel's identity. An invalid one cannot be joined to `dim_vessel` or counted as a vessel. Most of the 25 have prefixes of non-ships (`111` SAR aircraft, `99` AtoN, `970` AIS-SART). | One transmitter (`3638`, 43,944 rows) reports as Class A and may be a real ship with a misconfigured transponder. Its name and call sign could identify it. | `silver.rejects`; recovery by call sign is future work |
+| `POSITION_SENTINEL` | 17,346 rows (`lat = 91`) | Without a position, a row cannot be placed in a zone, and every Gold measure depends on the zone. | The static and voyage fields of these messages (name, destination) | `silver.rejects`. `dim_vessel` uses accepted rows only, so these do not reach it. |
+| `BAD_TIMESTAMP`, `TS_OUTSIDE_FILE_DAY`, `BAD_POSITION`, `MALFORMED_ROW` | 0 rows | A row with no usable time or position cannot be placed. A row from another day would land in the wrong partition. | — | `silver.rejects` (none on this day) |
+| exact duplicates | 6,211,222 rows | All 26 columns are identical, so the copy adds no fact. Kept, it would multiply every count, and its gap of 0 s would hide `POSITION_JUMP` (P3). | Only the number of copies, roughly how many stations heard the message (a coverage signal) | Bronze; counted in `ops.dq_metrics` |
+| `(mmsi, ts_utc)` conflicts | 47,734 rows | The grain allows one position per vessel and second. Two positions in the same second give an undefined step and speed. The most complete row is kept, ties go to the smallest hash (reproducible), and the kept row is flagged `TS_CONFLICT`. | The losing row may be the correct one. | Bronze only. The kept row carries `TS_CONFLICT` and the group size. Losing rows are not copied to `rejects` (a limitation, §9). |
+| sentinel values | 5,976 heading values | 511 means "not available" in the AIS standard. Nulling it removes no fact, and the row stays. | — | flag on the row; the raw value is in Bronze |
+| placeholder text | spellings of "missing" | see §5.2 | The difference between `Unknown` and an empty field | Bronze |
+| `POSITION_JUMP` | **nothing removed**: 26,356 rows flagged | A jump can be the first fix after a long gap, or the previous fix may be the wrong one. Silver cannot tell which, so it flags. | — | the row, with its flag |
+| no `dim_vessel` version | **nothing removed**: 45,797 positions with a null key | The position is valid. Only its vessel type is unknown. | — | the row; it counts in Gold by `mmsi` |
+| columns not in `vessel_position` or `dim_vessel` | `destination`, `eta`, `draught`, `cargo_type`, `data_source_type` | The Gold questions (who is in port, how long) need none of them. They describe the voyage, not the fix, so on the position grain they would repeat every few seconds. | **High.** Destination and ETA announce arrivals before they happen. Draught shows whether a ship is loaded. Non-null shares: destination 67 %, draught 66 %, ETA 57 %. | Bronze only. A `silver.dim_voyage` versioned like `dim_vessel` is the planned fix (D-19, §9). |
+| `dim_vessel` minimum of 2 reports | static combinations seen once in a day | One garbled message must not open a vessel version (D-12). | A real change seen only once in a day. This is rare, because static data is broadcast every 6 minutes. | Bronze; `scd2_min_reports` in the config |
+
+Two removals happen outside Silver, and both are reversible:
+- **Gold** drops calls under 30 minutes (§7). The positions stay in Silver.
+- A date that **fails a gate** is not published to Gold. It stays in Silver.
+
+### 5.5 Quality evidence: before and after
 
 `ops.dq_metrics` is filled at two checkpoints:
 - `bronze_in`: before cleaning;
@@ -235,7 +302,7 @@ observations from it:
 
 `ais-pipeline dq-report --date D` prints the full before/after table from `ops.dq_metrics`.
 
-### 5.5 Enrichment
+### 5.6 Enrichment
 
 **`dim_vessel`, SCD Type 2 (D-12).** The first design kept the most frequent combination of
 attributes per vessel and day. The fixture shows why that is wrong: a name change at 00:20,
@@ -261,7 +328,9 @@ these rows still count. They only lack the vessel type in the per-type breakdown
 
 **Movement features:**
 - `gap_s`, `step_km` and `implied_speed_kn` come from `lag` over a per-MMSI window;
-- `POSITION_JUMP` flags implied speeds above 50 kn;
+- `POSITION_JUMP` flags implied speeds above 50 kn. No in-scope vessel type sails that fast
+  (the fastest are high-speed ferries, at about 40 kn), so a higher implied speed means at
+  least one of the two fixes is wrong. The row is flagged, not removed (§5.4);
 - the haversine is written only with built-in functions, so Catalyst can optimise it (a UDF is
   measured as the alternative in P5);
 - the previous day's last fix of each vessel is added as context, so the first fix of the day
@@ -274,7 +343,7 @@ that at load time. So one **broadcast left join** on "inside the anchorage circl
 `port`, `anchorage` or `at_sea` directly. A bounding-box comparison runs before the
 trigonometry; its gain is measured in P2.
 
-### 5.6 Three Spark APIs, each where it fits
+### 5.7 Three Spark APIs, each where it fits
 
 | API | where | why |
 |---|---|---|
@@ -282,7 +351,7 @@ trigonometry; its gain is measured in P2.
 | Spark SQL | `rules.sql`, the SCD2 `MERGE`, `congestion.sql` | the clearest form for set logic, `CASE` rules and `MERGE` |
 | RDD | `rdd_check.py`: `map → reduceByKey → filter → sum` | an independent cross-check of the duplicate count (`--rdd-check`); its cost vs DataFrame is P6 |
 
-### 5.7 Tests
+### 5.8 Tests
 
 | | count | covers |
 |---|---:|---|
@@ -290,11 +359,11 @@ trigonometry; its gain is measured in P2.
 | integration | 36 | Bronze ingest, idempotency and schema evolution, row conservation recounted term by term, SCD2 with a planted name change, full Silver rerun gives identical rows, Gold reconciliation, stale gate, dashboard render |
 | **total** | **181** | run on every PR by `ci.yml` (about 2 min for the setup PR, about 10 min for the full suite) |
 
-### 5.8 Scalability: volume, late data, schema change
+### 5.9 Scalability: volume, late data, schema change
 
 **Volume.** One day is 18.7 M rows: 3.34 GB of CSV, 548 MB of Bronze Delta. Every stage works
 on one `_source_date`/`date` partition and writes it with `replaceWhere`, so a run touches one
-day plus the previous day's last fix per vessel (one aggregation, §5.5). The cost of a day does
+day plus the previous day's last fix per vessel (one aggregation, §5.6). The cost of a day does
 not grow with the size of the lake, and a backfill is a loop over days. The limit is memory per
 day, not the number of days: a full day needed the three changes of D-17 to fit in the 8 GB
 VM. At 10× the daily volume, the first things to revisit are the 32 MB read partitions, the
@@ -430,32 +499,47 @@ becomes a pickled Python tuple, and the shuffle spills: about 1.9 GB written to 
 run, against none for `distinct()`. Its first attempt
 had the JVM killed by the kernel. It finished with `spark.python.worker.memory=256m`. The
 pipeline counts duplicates with DataFrames. The RDD count runs only behind `--rdd-check`, as an
-independent cross-check of the same number (§5.6).
+independent cross-check of the same number (§5.7).
 
 ## 7. Gold: serve the outcome
 
 **Why Gold differs from Silver:**
 - Silver holds every position (reusable for any question). Gold holds two small,
   purpose-built tables that the dashboard reads directly, without Spark.
+- Gold is the only layer that applies business thresholds (call length, anchor speed). Each
+  threshold is a config value, not a code constant, and Silver keeps the rows a threshold
+  excludes. A different threshold only means a Gold rebuild.
 
 **Port calls (D-14):**
 - A first version split calls on Silver's `gap_s`. That failed: a ship reporting every 10 s
   at sea never shows a gap, even after it leaves the port.
 - The fix filters to `zone = 'port'` first and runs gaps-and-islands on the in-port fixes. A
   new call starts when the port changes or after more than 2 h out of the port.
-- A running sum of the "new call" marks numbers the calls. Calls under 30 min are passing
-  ships, not visits, and are dropped.
+- A running sum of the "new call" marks numbers the calls.
+- **Why 2 h:** a ship that shifts between berths, or briefly leaves and comes back, is on one
+  visit. Splitting it would double-count the arrival.
+- **Why drop calls under 30 min:** ferries and coasters pass through the port circle, and
+  Copenhagen's circle covers part of the fairway. Counted as visits, they would inflate the
+  arrivals and pull the dwell time down. The cost is that short service calls (pilot boats,
+  bunkering) are not counted. Their positions stay in Silver, and the threshold is
+  `min_port_call_min`.
 
 **Congestion** is Spark SQL over temporary views:
 - `COUNT(DISTINCT mmsi)` in port, and at anchor (anchorage zone and SOG < 1 kn), per port,
-  hour and ship type group;
+  hour and ship type group. The anchorage circle also contains the approach channel. Only a
+  vessel that is almost stopped there is waiting; one moving at speed is arriving or
+  leaving. Distinct vessels are counted, not positions, because a ship reporting every 2 s
+  would otherwise count 30 times more than one reporting every minute;
 - arrivals and departures come from `port_calls`.
 
 **Quality gates (D-15).** A Silver date reaches Gold only if three checks on `ops.dq_metrics`
 pass:
-- all 24 hours are present;
-- the in-scope reject rate is ≤ 5 %;
-- the row count is ≥ 0.5 × the median of the other days.
+- all 24 hours are present. A missing hour would show as zero vessels in port, which reads as
+  a fact, not as a gap;
+- the in-scope reject rate is ≤ 5 %. The measured rate is 0.89 % on the full day and 1.78 %
+  on the dev sample, so 5 % is three to five times the normal rate and indicates a broken
+  file, not a noisy day;
+- the row count is ≥ 0.5 × the median of the other days, which catches a truncated file.
 
 `port_calls` is recomputed from the gated dates; congestion is rewritten with `replaceWhere`
 only for gated dates. A failing date keeps its previous Gold rows and is logged `stale` in
@@ -524,6 +608,16 @@ summary, the backfill row counts.]**
   error still opens a version. **[VM: versions per vessel per day.]**
 - **Single node:** performance conclusions hold for `local[4]`. At 10× the volume they would
   need re-measuring on a cluster (stretch AIS-45 not done).
+- **Voyage fields are not in Silver** (D-19). Destination, ETA and draught are reported by
+  most vessels (57–67 % non-null) and are the natural input for congestion *forecasts*. Today
+  they exist only in Bronze. A `silver.dim_voyage`, versioned like `dim_vessel`, would add them
+  without changing the position grain. A rebuild from Bronze would also fill them for every
+  past day.
+- **Losing conflict rows are kept only in Bronze.** The kept row is flagged `TS_CONFLICT`, but
+  the 47,734 rows it replaced are not in `rejects`. Writing them there with a
+  `CONFLICT_LOSER` code would make the choice auditable without querying Bronze.
+- **One transmitter rejected as `BAD_MMSI` may be a real ship** (`3638`, 43,944 rows). Matching
+  invalid MMSIs to vessels by call sign or name would recover it.
 - **Processing order:** days must be processed in date order for the SCD2 no-op rule. A late
   day older than the current version is ignored, not merged into the history.
 
@@ -535,6 +629,8 @@ summary, the backfill row counts.]**
 >   defects made every rule testable; the decision log made trade-offs explicit.
 > - *What did not, and why:* the first port-call split on `gap_s` (D-14); the daily-mode SCD2
 >   (D-12); the cross join for zones (D-13); a build-time `Column` needing a SparkContext.
+> - *What we dropped and should not have:* the voyage fields (D-19). The feedback "dropping
+>   data can lose valuable information" holds there; the rejects table is the answer for rows.
 > - *Running the project alone after 2 November:* what was cut or kept, and how.
 > - *At 10× volume:* a Spark cluster instead of `local[4]`, object storage instead of a local
 >   volume, incremental Gold instead of recomputing `port_calls`, streaming ingestion of the
@@ -563,5 +659,6 @@ summary, the backfill row counts.]**
 | D-16 | experiments never write to the prod lake |
 | D-17 | Silver fits a full day in 8 GB by staying out of the heap |
 | D-18 | one-person prod approval and a backfill of one day per run |
+| D-19 | narrow by layer, never delete; voyage fields stay in Bronze for now |
 
 Full entries: `docs/decisions.md`.
